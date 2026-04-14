@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "local-ai-gateway"
+name = "aigateway-local"
 version = "0.1.0"
-description = "Multimodal local AI gateway with job queue, SSE progress, and provider adapters"
+description = "Self-hosted multimodal AI gateway — unified API for LLMs, image, audio and video inference with job queue, SSE progress and local model support"
 requires-python = ">=3.12"
 
 dependencies = [

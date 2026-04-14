@@ -3,7 +3,7 @@ services:
   # ─── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: lag_postgres
+    container_name: agl_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: local_ai_gateway
@@ -22,7 +22,7 @@ services:
   # ─── Redis ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: lag_redis
+    container_name: agl_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -39,7 +39,7 @@ services:
   # ─── MinIO ──────────────────────────────────────────────────────────────────
   minio:
     image: minio/minio:latest
-    container_name: lag_minio
+    container_name: agl_minio
     restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -61,7 +61,7 @@ services:
   # Access: http://localhost:9090
   prometheus:
     image: prom/prometheus:latest
-    container_name: lag_prometheus
+    container_name: agl_prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
@@ -82,7 +82,7 @@ services:
   # Access: http://localhost:3000  (admin / admin — change on first login)
   grafana:
     image: grafana/grafana:latest
-    container_name: lag_grafana
+    container_name: agl_grafana
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -102,7 +102,7 @@ services:
   # One-shot container that creates the default bucket on first run.
   minio_init:
     image: minio/mc:latest
-    container_name: lag_minio_init
+    container_name: agl_minio_init
     depends_on:
       minio:
         condition: service_healthy

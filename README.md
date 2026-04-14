@@ -1,8 +1,8 @@
-# Local AI Gateway
+# aigateway-local
 
-A multimodal local AI gateway — runs on your Ubuntu machine and accepts inference requests from any HTTP client (MacBook, another server, etc.).
+A self-hosted multimodal AI gateway — runs on your Ubuntu machine and accepts inference requests from any HTTP client (MacBook, another server, etc.).
 
-Think of it as a self-hosted OpenRouter: a unified API for text, audio, image, and video generation using locally installed models, with job queuing, real-time progress via SSE, and artifact storage.
+Think of it as a self-hosted OpenRouter: a unified API for LLMs, TTS, STT, image and video generation using locally installed models, with job queuing, real-time progress via SSE, and artifact storage.
 
 ---
 
