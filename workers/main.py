@@ -74,6 +74,13 @@ async def startup(ctx: dict[str, Any]) -> None:
         except Exception as e:
             log.error("provider_load_failed", provider="local_tts", error=str(e))
 
+    if os.environ.get("ENABLE_PROVIDER_LOCAL_STT", "false").lower() == "true":
+        try:
+            from src.modules.providers.local_stt.provider import LocalSTTProvider
+            registry.register(LocalSTTProvider())
+        except Exception as e:
+            log.error("provider_load_failed", provider="local_stt", error=str(e))
+
     # Initialize all loaded providers (loads models into GPU/memory)
     for pid in registry.list_provider_ids():
         provider = registry.get(pid)

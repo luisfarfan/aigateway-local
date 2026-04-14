@@ -61,6 +61,15 @@ diffusers = [
     "torch>=2.4.0",
 ]
 
+stt = [
+    "faster-whisper>=1.0.0",    # CTranslate2 backend — 4x faster than openai-whisper
+    # Alternative (if faster-whisper not available): pip install openai-whisper
+]
+
+tts = [
+    "TTS>=0.22.0",              # Coqui XTTS v2 / Kokoro / Piper via LocalTTSProvider
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 

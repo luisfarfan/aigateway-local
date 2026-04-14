@@ -41,9 +41,13 @@ def create_app() -> FastAPI:
     # ── Routers ───────────────────────────────────────────────────────────────
     from src.modules.jobs.router import router as jobs_router
     from src.modules.events.router import router as events_router
+    from src.modules.artifacts.router import router as artifacts_router
+    from src.modules.uploads.router import router as uploads_router
 
     app.include_router(jobs_router, prefix=settings.api_prefix)
     app.include_router(events_router, prefix=settings.api_prefix)
+    app.include_router(artifacts_router, prefix=settings.api_prefix)
+    app.include_router(uploads_router, prefix=settings.api_prefix)
 
     # ── Health / readiness ────────────────────────────────────────────────────
     _register_health_routes(app)

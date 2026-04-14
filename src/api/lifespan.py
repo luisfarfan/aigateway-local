@@ -75,6 +75,14 @@ def _build_provider_registry() -> ProviderRegistry:
         except Exception as e:
             log.error("provider_load_failed", provider="local_tts", error=str(e))
 
+    # Local STT — speech-to-text via faster-whisper or openai-whisper
+    if os.environ.get("ENABLE_PROVIDER_LOCAL_STT", "false").lower() == "true":
+        try:
+            from src.modules.providers.local_stt.provider import LocalSTTProvider
+            registry.register(LocalSTTProvider())
+        except Exception as e:
+            log.error("provider_load_failed", provider="local_stt", error=str(e))
+
     registered = registry.list_provider_ids()
     log.info("providers_registered", providers=registered, count=len(registered))
     return registry
