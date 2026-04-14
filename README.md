@@ -70,14 +70,15 @@ Think of it as a self-hosted OpenRouter: a unified API for text, audio, image, a
 ```
 local-ai-gateway/
 ├── src/
-│   ├── core/                   # shared kernel (config, db, redis, storage, exceptions)
+│   ├── core/                   # shared kernel (config, db, redis, storage, metrics, exceptions)
 │   ├── api/                    # FastAPI app factory, lifespan, middleware
 │   └── modules/
 │       ├── jobs/               # job domain: models, schemas, repository, service, router
 │       ├── events/             # SSE: publisher, subscriber, router
 │       ├── queue/              # dispatcher (ARQ), scheduler (modality semaphore)
-│       ├── workers/            # (reserved for future per-modality worker classes)
-│       ├── artifacts/          # artifact schemas
+│       ├── artifacts/          # artifact CRUD + presigned URL refresh
+│       ├── uploads/            # multipart upload + presigned PUT URL
+│       ├── status/             # GET /status — providers, job counts, GPU info
 │       ├── auth/               # API key middleware
 │       └── providers/          # hexagonal layer
 │           ├── base.py         # Port: BaseProvider interface
@@ -85,13 +86,18 @@ local-ai-gateway/
 │           ├── stub/           # always-available test/dev adapter
 │           ├── diffusers/      # HuggingFace Diffusers (image, video)
 │           ├── local_llm/      # Ollama + HF Transformers (text)
-│           └── local_tts/      # XTTS / Kokoro / Piper (audio)
+│           ├── local_tts/      # XTTS / Kokoro / Piper (TTS)
+│           └── local_stt/      # faster-whisper / openai-whisper (STT)
 ├── workers/
 │   └── main.py                 # ARQ worker entrypoint
 ├── migrations/                 # Alembic migrations
+├── grafana/
+│   ├── provisioning/           # auto-provisioned datasource + dashboard loader
+│   └── dashboards/             # local_ai_gateway.json — pre-built Grafana dashboard
+├── prometheus.yml              # scrape config (targets host API at :8000/metrics)
 ├── docs/adr/                   # Architecture Decision Records
 ├── tests/
-├── docker-compose.yml          # PostgreSQL + Redis + MinIO
+├── docker-compose.yml          # Postgres + Redis + MinIO + Prometheus + Grafana
 ├── .env.example
 ├── Makefile
 └── pyproject.toml
@@ -124,8 +130,10 @@ make cp-env    # copies .env.example → .env
 
 ```bash
 make up
-# Starts: PostgreSQL 16 · Redis 7 · MinIO
-# MinIO console: http://localhost:9001 (minioadmin / minioadmin123)
+# Starts: PostgreSQL 16 · Redis 7 · MinIO · Prometheus · Grafana
+# MinIO console:  http://localhost:9001  (minioadmin / minioadmin123)
+# Grafana:        http://localhost:3000  (admin / admin)
+# Prometheus:     http://localhost:9090
 ```
 
 ### 4. Apply database migrations
@@ -242,7 +250,23 @@ ollama pull qwen2.5
 Supported model IDs (add more in `src/modules/providers/local_llm/config.py`):
 `llama3.2`, `llama3.2:3b`, `mistral`, `mixtral`, `qwen2.5`, `deepseek-r1`, `codellama`
 
-### 5. Start everything
+### 5. Speech-to-text (Whisper)
+
+```bash
+pip install faster-whisper   # recommended — 4× faster than openai-whisper
+# or: pip install openai-whisper  (fallback)
+```
+
+In `.env`:
+```bash
+ENABLE_PROVIDER_LOCAL_STT=true
+STT_MODEL_SIZE=base          # tiny | base | small | medium | large-v3
+STT_DEVICE=auto              # auto | cuda | cpu
+STT_COMPUTE_TYPE=float16     # float16 (GPU) | int8 (CPU)
+# STT_MODEL_PATH=/data/models/whisper   # optional local path
+```
+
+### 6. Start everything
 
 ```bash
 make up          # infra services
@@ -316,6 +340,45 @@ data: {"event_type":"completed","job_id":"...","status":"completed","progress_pe
 The connection closes automatically on terminal events (`completed`, `failed`, `cancelled`).  
 On reconnect, send `Last-Event-ID` to replay missed events.
 
+### Upload a file (input for STT / img2img)
+
+```bash
+# Direct multipart upload (max 500 MB)
+curl -X POST http://localhost:8000/api/v1/uploads \
+  -H "Authorization: Bearer your-key" \
+  -F "file=@/path/to/audio.wav"
+# → {"storage_key": "uploads/client-id/abc123/audio.wav"}
+
+# Or get a presigned PUT URL and upload directly to MinIO
+curl -X POST http://localhost:8000/api/v1/uploads/presigned \
+  -H "Authorization: Bearer your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "audio.wav", "content_type": "audio/wav"}'
+# → {"upload_url": "http://...", "storage_key": "..."}
+```
+
+Use the `storage_key` as input when creating a job (e.g. STT transcription).
+
+### Download artifacts
+
+```bash
+# Metadata + fresh presigned URL
+GET /api/v1/artifacts/{id}
+
+# 302 redirect → direct download (browser / curl friendly)
+GET /api/v1/artifacts/{id}/download
+
+# All artifacts for a job
+GET /api/v1/jobs/{id}/artifacts
+```
+
+### System status
+
+```bash
+curl http://localhost:8000/api/v1/status
+# → { "providers": [...], "jobs": {"queued": 2, "running": 1, ...}, "gpu": {...} }
+```
+
 ### Other endpoints
 
 | Method | Path | Description |
@@ -324,6 +387,7 @@ On reconnect, send `Last-Event-ID` to replay missed events.
 | `GET` | `/api/v1/jobs/{id}` | Get job with artifacts |
 | `DELETE` | `/api/v1/jobs/{id}` | Cancel a job |
 | `GET` | `/api/v1/providers` | List registered providers and capabilities |
+| `GET` | `/api/v1/status` | Providers, job counts, GPU/VRAM info |
 | `GET` | `/health` | Liveness probe |
 | `GET` | `/ready` | Readiness probe (checks DB, Redis) |
 | `GET` | `/metrics` | Prometheus metrics |
@@ -377,6 +441,40 @@ On reconnect, send `Last-Event-ID` to replay missed events.
   }
 }
 ```
+
+---
+
+## Observability
+
+Prometheus + Grafana are included in `docker-compose.yml` — no extra setup needed.
+
+```bash
+make up   # starts everything including Prometheus and Grafana
+```
+
+| Service | URL | Credentials |
+|---|---|---|
+| **Grafana dashboard** | http://localhost:3000 | admin / admin |
+| **Prometheus** | http://localhost:9090 | — |
+| **Metrics endpoint** | http://localhost:8000/metrics | — |
+
+Grafana opens directly on the pre-built **Local AI Gateway** dashboard with:
+
+- **Jobs completed / Active / Queue depth / Success rate** — live stat panels
+- **Job throughput** — rate per second by status (completed / failed / retried)
+- **Active jobs by provider** — see when your GPU is busy
+- **Inference duration p50 / p95 / p99** — latency percentiles per provider
+- **Queue depth by priority** — high / normal / low lanes
+- **Failed jobs over time** — spikes = provider problems
+
+Custom metrics exposed (all prefixed `gateway_`):
+
+| Metric | Type | Labels |
+|---|---|---|
+| `gateway_jobs_total` | Counter | `job_type`, `status`, `provider` |
+| `gateway_active_jobs` | Gauge | `provider`, `job_type` |
+| `gateway_queue_depth` | Gauge | `priority` |
+| `gateway_inference_duration_seconds` | Histogram | `provider`, `job_type` |
 
 ---
 

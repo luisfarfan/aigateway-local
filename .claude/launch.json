@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "FastAPI — API Server",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+      "port": 8000
+    },
+    {
+      "name": "ARQ Worker",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "workers.main"],
+      "port": null
+    },
+    {
+      "name": "Infrastructure (Postgres + Redis + MinIO + Prometheus + Grafana)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up"],
+      "port": 3000
+    },
+    {
+      "name": "Grafana",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "grafana"],
+      "port": 3000
+    },
+    {
+      "name": "Prometheus",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "prometheus"],
+      "port": 9090
+    }
+  ]
+}
