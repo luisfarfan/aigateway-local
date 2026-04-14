@@ -31,6 +31,7 @@ from src.modules.jobs.schemas import (
     JobListResponse,
     JobResponse,
 )
+from src.core.metrics import queue_depth
 from src.modules.providers.registry import ProviderRegistry
 from src.modules.queue.dispatcher import enqueue_job
 
@@ -106,6 +107,9 @@ class JobService:
 
         # 5. Enqueue to ARQ priority queue
         await enqueue_job(self._arq, job.id, request.priority)
+
+        # Track queue depth (decremented in executor when job starts RUNNING)
+        queue_depth.labels(priority=str(request.priority.value)).inc()
 
         log.info("job_created", job_id=str(job.id))
         return _to_response(job, [])

@@ -16,6 +16,7 @@ Execution phases:
   RUNNING → COMPLETED / FAILED / retried QUEUED
 """
 import asyncio
+import time
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 from src.core.database import AsyncSessionLocal
 from src.core.domain import JobStatus
+from src.core.metrics import active_jobs, inference_duration_seconds, jobs_total, queue_depth
 from src.core.storage import storage
 from src.modules.events.publisher import RedisOnlyPublisher
 from src.modules.events.schemas import SSEEvents
@@ -143,6 +145,16 @@ async def _run_with_session(
         await session.commit()
         await publisher.publish(SSEEvents.started(job_id, worker_id))
 
+        # Job left the queue — update queue depth metric
+        queue_depth.labels(priority=str(current_job.priority.value)).dec()
+
+        provider_id = str(current_job.provider or job.provider)
+        job_type_str = str(current_job.type.value)
+
+        # Track concurrency and wall-clock inference time
+        active_jobs.labels(provider=provider_id, job_type=job_type_str).inc()
+        t0 = time.monotonic()
+
         # ── Callbacks ─────────────────────────────────────────────────────
 
         async def on_progress(percent: float, step: str | None) -> None:
@@ -188,10 +200,19 @@ async def _run_with_session(
             )
         except asyncio.CancelledError:
             log.info("execute_job_cancelled_mid_execution", job_id=str(job_id))
+            active_jobs.labels(provider=provider_id, job_type=job_type_str).dec()
             return
         except Exception as e:
             log.exception("provider_execute_unhandled_error")
             result = ProviderResult(success=False, error_message=f"Unexpected error: {e}")
+        finally:
+            elapsed = time.monotonic() - t0
+            inference_duration_seconds.labels(
+                provider=provider_id, job_type=job_type_str
+            ).observe(elapsed)
+
+        # Decrement active count now that inference finished (success or failure)
+        active_jobs.labels(provider=provider_id, job_type=job_type_str).dec()
 
         # ── Handle result ──────────────────────────────────────────────────
         final_job = await repo.get_by_id(job_id)
@@ -212,6 +233,9 @@ async def _run_with_session(
             await publisher.publish(
                 SSEEvents.completed(job_id, result.result_summary, artifact_urls)
             )
+            jobs_total.labels(
+                job_type=job_type_str, status="completed", provider=provider_id
+            ).inc()
             log.info(
                 "execute_job_completed",
                 job_id=str(job_id),
@@ -245,6 +269,8 @@ async def _handle_failure(
     Final failure emits the terminal failed event and closes the SSE stream.
     """
     should_retry = job.retry_count < job.max_retries
+    provider_id = str(job.provider or "unknown")
+    job_type_str = str(job.type.value)
 
     if should_retry:
         delay_s = 2 ** (job.retry_count + 1)  # 2, 4, 8 seconds
@@ -276,6 +302,10 @@ async def _handle_failure(
             _queue_name=job.priority.to_arq_queue(),
             _defer_by=timedelta(seconds=delay_s),
         )
+
+        jobs_total.labels(job_type=job_type_str, status="retried", provider=provider_id).inc()
+        queue_depth.labels(priority=str(job.priority.value)).inc()
+
         log.info(
             "execute_job_retrying",
             job_id=str(job.id),
@@ -285,6 +315,7 @@ async def _handle_failure(
             error=error,
         )
     else:
+        jobs_total.labels(job_type=job_type_str, status="failed", provider=provider_id).inc()
         await _fail_final(repo, job, publisher, error, session)
 
 

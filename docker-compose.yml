@@ -56,6 +56,48 @@ services:
       timeout: 5s
       retries: 10
 
+  # ─── Prometheus ─────────────────────────────────────────────────────────────
+  # Scrapes /metrics from the API running on the host machine.
+  # Access: http://localhost:9090
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: lag_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    # host.docker.internal → host machine IP (needed to reach the API on the host)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── Grafana ─────────────────────────────────────────────────────────────────
+  # Pre-provisioned with Prometheus datasource + Local AI Gateway dashboard.
+  # Access: http://localhost:3000  (admin / admin — change on first login)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: lag_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/local_ai_gateway.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
   # ─── MinIO bucket init ──────────────────────────────────────────────────────
   # One-shot container that creates the default bucket on first run.
   minio_init:
@@ -77,3 +119,5 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  prometheus_data:
+  grafana_data:

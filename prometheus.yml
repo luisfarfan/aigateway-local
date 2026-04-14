@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s        # How often Prometheus scrapes /metrics
+  evaluation_interval: 15s    # How often rules are evaluated
+
+scrape_configs:
+  # ── Local AI Gateway API ──────────────────────────────────────────────────
+  # The API runs on the host (not in Docker), reachable via host.docker.internal.
+  # On Linux, docker-compose adds host.docker.internal → host-gateway automatically
+  # (see the extra_hosts entry in docker-compose.yml for the prometheus service).
+  - job_name: "local_ai_gateway"
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+    metrics_path: "/metrics"
+    scrape_interval: 10s      # Faster scrape for near-real-time Grafana panels
