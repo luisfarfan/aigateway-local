@@ -76,6 +76,28 @@ class JobRepository:
         await self._s.refresh(job)
         return job
 
+    async def update_progress(
+        self,
+        job: Job,
+        progress_percent: float | None = None,
+        current_step: str | None = None,
+    ) -> Job:
+        """
+        Update progress fields without a status transition.
+        Called frequently by providers during execution — does NOT validate the
+        state machine (progress stays within RUNNING).
+        """
+        if progress_percent is not None:
+            job.progress_percent = progress_percent
+        if current_step is not None:
+            job.current_step = current_step
+        return await self.update(job)
+
+    async def increment_retry(self, job: Job) -> Job:
+        """Increment retry_count in place."""
+        job.retry_count += 1
+        return await self.update(job)
+
     async def update_status(
         self,
         job: Job,
