@@ -4,7 +4,7 @@ Job repository — all DB access for the jobs module.
 No business logic here. The service layer calls the repository.
 The repository only knows about SQLModel/SQLAlchemy operations.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
@@ -118,7 +118,7 @@ class JobRepository:
                 f"Invalid transition: {job.status} → {new_status} for job {job.id}"
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         job.status = new_status
 
         if new_status == JobStatus.QUEUED:

@@ -65,7 +65,7 @@ def _register_health_routes(app: FastAPI) -> None:
     @app.get("/health", tags=["Observability"], summary="Liveness probe")
     async def health():
         """Returns 200 if the API process is alive."""
-        return {"status": "ok", "service": "local-ai-gateway"}
+        return {"status": "ok", "service": "aigateway-local"}
 
     @app.get("/ready", tags=["Observability"], summary="Readiness probe")
     async def ready(request: Request):
