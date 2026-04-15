@@ -89,7 +89,7 @@ class Artifact(SQLModel, table=True):
     public_url: str | None = None        # presigned URL (refreshed on demand)
     mime_type: str | None = None
     size_bytes: int | None = None
-    metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    extra_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -125,4 +125,4 @@ class WorkerRuntime(SQLModel, table=True):
     jobs_failed: int = Field(default=0)
     last_heartbeat: datetime | None = None
     started_at: datetime = Field(default_factory=_utcnow)
-    metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    extra_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
