@@ -1163,14 +1163,6 @@ MINIO_ENDPOINT=http://localhost:9010
 pip install "proxima-llm @ git+ssh://git@github.com/luisfarfan/aigateway-local.git#subdirectory=sdk/python"
 ```
 
-> Mientras el gateway viva en la rama `feat/gateway-cloud-local` y no en `main`, hay
-> que apuntar a ella — si no, pip busca el paquete en `main`, no lo encuentra y falla
-> con `does not appear to be a Python project`:
->
-> ```bash
-> pip install "proxima-llm @ git+ssh://git@github.com/luisfarfan/aigateway-local.git@feat/gateway-cloud-local#subdirectory=sdk/python"
-> ```
-
 Dos superficies, porque los proyectos que lo consumen usan una cada uno:
 
 ```python
