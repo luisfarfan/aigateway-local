@@ -79,6 +79,25 @@ class VideoGenerationInput(BaseModel):
     seed: int | None = None
 
 
+class SceneSpec(BaseModel):
+    image_key: str | None = Field(None, description="MinIO key for the scene image")
+    audio_key: str | None = Field(None, description="MinIO key for the scene audio")
+    text: str | None = Field(None, description="Text for hardcoded subtitles in this scene")
+
+
+class VideoAssemblyInput(BaseModel):
+    scenes: list[SceneSpec] = Field(..., min_length=1, max_length=20)
+    fps: int = Field(default=24, ge=1, le=60)
+    font: str = Field(default="Arial")
+    fontsize: int = Field(default=40, ge=10, le=200)
+    font_color: str = Field(default="white")
+
+
+class AutonomousMissionInput(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=1000)
+    complexity: str = Field(default="standard") # standard | deep
+
+
 class PipelineStepSpec(BaseModel):
     step_type: str = Field(
         ..., description="e.g. 'script_generation', 'tts', 'image_generation', 'video_assembly'"

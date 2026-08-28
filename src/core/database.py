@@ -24,7 +24,7 @@ _settings = get_settings()
 # pool_pre_ping: validates connections before use (handles dropped DB connections).
 engine = create_async_engine(
     _settings.database_url,
-    echo=_settings.debug,           # logs all SQL in debug mode
+    echo=False,                     # keep logs clean
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,

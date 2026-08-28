@@ -17,7 +17,9 @@ class JobType(StrEnum):
     IMAGE_GENERATION = "image_generation"
     IMAGE_EDIT = "image_edit"
     VIDEO_GENERATION = "video_generation"
+    VIDEO_ASSEMBLY = "video_assembly"
     MULTIMODAL_PIPELINE = "multimodal_pipeline"
+    AUTONOMOUS_MISSION = "autonomous_mission"
 
 
 class JobStatus(StrEnum):
@@ -52,11 +54,10 @@ class JobPriority(StrEnum):
 
     def to_arq_queue(self) -> str:
         """Maps priority to the corresponding ARQ queue name."""
-        return {
-            JobPriority.HIGH: "high",
-            JobPriority.NORMAL: "normal",
-            JobPriority.LOW: "low",
-        }[self]
+        return "arq:queue"
+    
+    # Prefix constant for shared use
+    ARQ_PREFIX = "arq:queue:"
 
 
 class Modality(StrEnum):
@@ -87,6 +88,7 @@ class SSEEventType(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    MISSION_LOG = "mission_log"
 
 
 # Maps each job type to its modality.
@@ -99,5 +101,7 @@ JOB_TYPE_TO_MODALITY: dict[JobType, Modality] = {
     JobType.IMAGE_GENERATION: Modality.IMAGE,
     JobType.IMAGE_EDIT: Modality.IMAGE,
     JobType.VIDEO_GENERATION: Modality.VIDEO,
+    JobType.VIDEO_ASSEMBLY: Modality.VIDEO,
     JobType.MULTIMODAL_PIPELINE: Modality.PIPELINE,
+    JobType.AUTONOMOUS_MISSION: Modality.PIPELINE,
 }

@@ -56,6 +56,7 @@ async def run_job(ctx: dict[str, Any], job_id_str: str) -> dict[str, Any]:
 
     publisher = RedisOnlyPublisher(redis)
     structlog.contextvars.bind_contextvars(job_id=job_id_str, worker_id=worker_id)
+    log.info("executor_received_job", job_id=job_id_str)
 
     # ── Phase 1: load, validate, resolve provider ──────────────────────────
     async with AsyncSessionLocal() as session:
@@ -96,6 +97,7 @@ async def run_job(ctx: dict[str, Any], job_id_str: str) -> dict[str, Any]:
                 publisher=publisher,
                 arq_pool=arq_pool,
                 worker_id=worker_id,
+                registry=registry,
             )
     except TimeoutError as e:
         log.warning("execute_job_scheduler_timeout", modality=str(e))
@@ -120,6 +122,7 @@ async def _run_with_session(
     publisher: RedisOnlyPublisher,
     arq_pool: Any,
     worker_id: str,
+    registry: Any,
 ) -> None:
     """
     Runs the actual provider execution inside a single open DB session.
@@ -188,6 +191,7 @@ async def _run_with_session(
             worker_id=worker_id,
             on_progress=on_progress,
             on_artifact=on_artifact,
+            registry=registry,
         )
 
         result: ProviderResult

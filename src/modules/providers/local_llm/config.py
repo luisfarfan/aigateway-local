@@ -39,8 +39,12 @@ def _local_path(model_id: str, default: str) -> str:
     return os.environ.get(env_key, default)
 
 
+from src.core.config import get_settings
+
+_settings = get_settings()
+
 BACKEND = os.environ.get("LOCAL_LLM_BACKEND", "ollama")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_BASE_URL = _settings.ollama_base_url
 
 # ─── Model registry ───────────────────────────────────────────────────────────
 # Add your installed models here.
@@ -48,6 +52,14 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # For Transformers: set LOCAL_LLM_PATH_{ID} to the local model directory.
 
 SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
+
+    "llama3.1": LLMModelSpec(
+        model_id="llama3.1",
+        backend="ollama",
+        ollama_model="llama3.1",
+        context_length=8192,
+        vram_mb=6144,
+    ),
 
     "llama3.2": LLMModelSpec(
         model_id="llama3.2",

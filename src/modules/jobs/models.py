@@ -15,7 +15,7 @@ from src.core.domain import JobPriority, JobStatus, JobType
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Job(SQLModel, table=True):
@@ -89,7 +89,7 @@ class Artifact(SQLModel, table=True):
     public_url: str | None = None        # presigned URL (refreshed on demand)
     mime_type: str | None = None
     size_bytes: int | None = None
-    metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    extra_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -125,4 +125,4 @@ class WorkerRuntime(SQLModel, table=True):
     jobs_failed: int = Field(default=0)
     last_heartbeat: datetime | None = None
     started_at: datetime = Field(default_factory=_utcnow)
-    metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    runtime_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))

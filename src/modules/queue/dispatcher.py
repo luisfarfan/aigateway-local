@@ -38,21 +38,30 @@ async def enqueue_job(
     """
     queue_name = priority.to_arq_queue()
 
-    arq_job = await arq.enqueue_job(
-        EXECUTE_JOB_TASK,
-        str(job_id),           # workers receive the domain job_id as a string
-        _queue_name=queue_name,
-    )
-
     log.info(
-        "job_enqueued",
+        "job_enqueuing",
         job_id=str(job_id),
         priority=priority,
         queue=queue_name,
-        arq_job_id=arq_job.job_id if arq_job else None,
     )
 
-    return arq_job.job_id if arq_job else ""
+    try:
+        arq_job = await arq.enqueue_job(
+            EXECUTE_JOB_TASK,
+            str(job_id),           # workers receive the domain job_id as a string
+            _queue_name=queue_name,
+        )
+        log.info(
+            "job_enqueued",
+            job_id=str(job_id),
+            priority=priority,
+            queue=queue_name,
+            arq_job_id=arq_job.job_id if arq_job else None,
+        )
+        return arq_job.job_id if arq_job else ""
+    except Exception as e:
+        log.error("job_enqueue_failed", job_id=str(job_id), error=str(e))
+        raise
 
 
 async def enqueue_pipeline_step(

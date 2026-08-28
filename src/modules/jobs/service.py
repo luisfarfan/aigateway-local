@@ -83,7 +83,7 @@ class JobService:
                 return _to_response(existing, artifacts)
 
         # 3. Persist the job
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         job = Job(
             type=request.type,
             status=JobStatus.QUEUED,
@@ -128,7 +128,7 @@ class JobService:
         filters: JobListFilters,
         client_id: str,
     ) -> JobListResponse:
-        jobs, total = await self._repo.list(filters, client_id=client_id)
+        jobs, total = await self._repo.find_all(filters, client_id=client_id)
         items = []
         for job in jobs:
             artifacts = await self._repo.get_artifacts(job.id)
