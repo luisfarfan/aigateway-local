@@ -1,0 +1,54 @@
+{
+  "case": "chat_plain",
+  "why": "Superficie base OpenAI-compatible: forma de choices/usage que el gateway debe devolver hacia afuera.",
+  "expect": "ok",
+  "recorded_at": "2026-08-27T05:26:36+00:00",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "body": {
+      "model": "gpt-5.4-mini",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Responde solo con la palabra PONG."
+        }
+      ],
+      "max_tokens": 20
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "id": "resp_029b898d9d139a8b016a8fca8b573c87d2a7868fbb49f5c6a6",
+      "object": "chat.completion",
+      "created": 1787808395,
+      "model": "gpt-5.4-mini-2026-03-17",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "PONG",
+            "reasoning_content": null,
+            "tool_calls": null
+          },
+          "finish_reason": "stop",
+          "native_finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "completion_tokens": 24,
+        "total_tokens": 39,
+        "prompt_tokens": 15,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cached_creation_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 16
+        }
+      }
+    }
+  }
+}

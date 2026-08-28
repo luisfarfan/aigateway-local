@@ -10,7 +10,9 @@ services:
       POSTGRES_USER: gateway
       POSTGRES_PASSWORD: gateway_secret
     ports:
-      - "5432:5432"
+      # 5432 del host ya lo ocupa un PostgreSQL instalado en la máquina, así que
+      # el nuestro sale por 5442. Dentro de la red de compose sigue siendo 5432.
+      - "127.0.0.1:5442:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -45,8 +47,10 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
     ports:
-      - "9000:9000"    # S3 API
-      - "9001:9001"    # Web console → http://localhost:9001
+      # 9000 y 9001 del host ya están ocupados por otros servicios de la
+      # máquina. Dentro de la red de compose MinIO sigue siendo minio:9000.
+      - "127.0.0.1:9010:9000"    # S3 API
+      - "127.0.0.1:9011:9001"    # Consola web → http://localhost:9011
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -111,9 +115,159 @@ services:
         mc alias set local http://minio:9000 minioadmin minioadmin123 &&
         mc mb --ignore-existing local/local-ai-gateway &&
         mc anonymous set download local/local-ai-gateway &&
-        echo 'Bucket ready.'
+        mc mb --ignore-existing local/langfuse &&
+        echo 'Buckets ready.'
       "
     restart: "no"
+
+  # ─── CLIProxyAPI ────────────────────────────────────────────────────────────
+  # Acceso a modelos cloud (Gemini/Claude/Codex/Grok) por OAuth. Imagen vanilla
+  # upstream a propósito: las traducciones per-provider viven en Python, en
+  # src/modules/providers/cliproxy/translate.py (ver docs/PROXIMA_GATEWAY_PLAN.md §3).
+  #
+  # Puertos de host desplazados para no chocar con otras instancias de
+  # CLIProxyAPI que puedan estar corriendo en esta máquina. Los puertos DENTRO
+  # del contenedor son fijos: el binario los tiene hardcodeados para los
+  # callbacks de OAuth.
+  #
+  # El login OAuth NO funciona apuntando el navegador a la IP de la LAN:
+  # redirect_uri es http://localhost:<puerto>/callback y el forwarder redirige a
+  # 127.0.0.1:8317. Hay que tunelizar por SSH — ver docs/CLIPROXY-AUTH.md.
+  cliproxy:
+    image: eceasy/cli-proxy-api@sha256:c6fef08792488785b380fa776bcaf872e0c60a3f74fcb77effcfab74362ad70d  # v7.2.143 (upstream 4b5f1ea)
+    container_name: agl_cliproxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8417:8317"      # API + panel de gestión
+      - "127.0.0.1:11455:1455"     # callback OAuth  codex
+      - "127.0.0.1:18085:8085"     # callback OAuth  gemini
+      - "127.0.0.1:51221:51121"    # callback OAuth  antigravity
+      - "127.0.0.1:54645:54545"    # callback OAuth  anthropic
+      - "127.0.0.1:56221:56121"    # callback OAuth  xai
+    volumes:
+      - ./docker/cliproxy/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ${CLIPROXY_AUTH_PATH:-~/.proxima-gateway/cliproxy-auth}:/root/.cli-proxy-api
+    healthcheck:
+      # La imagen no trae wget ni curl. 207D = 8317 en hex; 0A = LISTEN.
+      # Escucha en tcp6, pero se miran los dos por si cambia.
+      test: ["CMD-SHELL", "grep -q ' 0A ' /proc/net/tcp6 /proc/net/tcp 2>/dev/null && grep -qE ':207D .* 0A ' /proc/net/tcp6 /proc/net/tcp || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Postgres init ──────────────────────────────────────────────────────────
+  # Langfuse necesita su propia base. Se crea acá y no con un script en
+  # /docker-entrypoint-initdb.d porque esos sólo corren con el volumen vacío, y
+  # el nuestro ya está inicializado.
+  postgres_init:
+    image: postgres:16-alpine
+    container_name: agl_postgres_init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: gateway_secret
+    entrypoint: >
+      /bin/sh -c "
+        psql -h postgres -U gateway -d local_ai_gateway -tc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 ||
+        psql -h postgres -U gateway -d local_ai_gateway -c 'CREATE DATABASE langfuse' &&
+        echo 'Langfuse database ready.'
+      "
+    restart: "no"
+
+  # ─── ClickHouse (Langfuse) ──────────────────────────────────────────────────
+  # Langfuse v3 guarda las trazas acá, no en Postgres: son series temporales de
+  # alto volumen. Sin puertos publicados — sólo lo usa Langfuse.
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: agl_clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─── Langfuse worker ────────────────────────────────────────────────────────
+  # Procesa la cola de eventos que ingesta la web. Reutiliza el Postgres, el
+  # Redis y el MinIO de este compose: son cuatro contenedores menos que levantar
+  # un stack de Langfuse aparte.
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: agl_langfuse_worker
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://gateway:gateway_secret@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT:?falta LANGFUSE_SALT en .env}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?falta LANGFUSE_ENCRYPTION_KEY en .env}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: minioadmin123
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: minioadmin123
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+
+  # ─── Langfuse web ───────────────────────────────────────────────────────────
+  # 3777 lo ocupa el PoC de Langfuse que vive en otro proyecto; este sale por
+  # 3778. UI y endpoint OTLP: http://localhost:3778
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: agl_langfuse_web
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:3778:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: ${LANGFUSE_URL:-http://localhost:3778}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?falta LANGFUSE_NEXTAUTH_SECRET en .env}
+      # Siembra org, proyecto, usuario y el par de claves al primer arranque.
+      # Evita el paso manual por la UI: el gateway ya trae esas claves en su
+      # .env y exporta trazas desde la primera petición.
+      LANGFUSE_INIT_ORG_ID: proxima
+      LANGFUSE_INIT_ORG_NAME: Proxima
+      LANGFUSE_INIT_PROJECT_ID: proxima-gateway
+      LANGFUSE_INIT_PROJECT_NAME: proxima-gateway
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?falta LANGFUSE_PUBLIC_KEY en .env}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?falta LANGFUSE_SECRET_KEY en .env}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@proxima.local}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-Admin}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?falta LANGFUSE_INIT_USER_PASSWORD en .env}
 
 volumes:
   postgres_data:
@@ -121,3 +275,5 @@ volumes:
   minio_data:
   prometheus_data:
   grafana_data:
+  clickhouse_data:
+  clickhouse_logs:

@@ -47,39 +47,62 @@ async def startup(ctx: dict[str, Any]) -> None:
     await storage.ensure_bucket()
 
     # Provider registry — same flag-based approach as API lifespan
-    import os
     registry = ProviderRegistry()
+    from src.modules.providers.stub.provider import StubProvider
 
-    if os.environ.get("ENABLE_PROVIDER_STUB", "true").lower() == "true":
+    if settings.enable_provider_stub:
         registry.register(StubProvider(step_delay_seconds=1.5))
 
-    if os.environ.get("ENABLE_PROVIDER_DIFFUSERS", "false").lower() == "true":
+    # CLIProxyAPI — modelos cloud por OAuth. No usa GPU: su límite es la cuota
+    # de arriba, no la VRAM.
+    if settings.enable_provider_cliproxy:
+        try:
+            from src.modules.providers.cliproxy.provider import CliproxyProvider
+            registry.register(CliproxyProvider())
+        except Exception as e:
+            log.error("provider_load_failed", provider="cliproxy", error=str(e))
+
+    if settings.enable_provider_diffusers:
         try:
             from src.modules.providers.diffusers.provider import DiffusersProvider
             registry.register(DiffusersProvider())
         except Exception as e:
             log.error("provider_load_failed", provider="diffusers", error=str(e))
 
-    if os.environ.get("ENABLE_PROVIDER_LOCAL_LLM", "false").lower() == "true":
+    if settings.enable_provider_local_llm:
         try:
             from src.modules.providers.local_llm.provider import LocalLLMProvider
             registry.register(LocalLLMProvider())
         except Exception as e:
             log.error("provider_load_failed", provider="local_llm", error=str(e))
 
-    if os.environ.get("ENABLE_PROVIDER_LOCAL_TTS", "false").lower() == "true":
+    if settings.enable_provider_local_tts:
         try:
             from src.modules.providers.local_tts.provider import LocalTTSProvider
             registry.register(LocalTTSProvider())
         except Exception as e:
             log.error("provider_load_failed", provider="local_tts", error=str(e))
 
-    if os.environ.get("ENABLE_PROVIDER_LOCAL_STT", "false").lower() == "true":
+    if settings.enable_provider_local_stt:
         try:
             from src.modules.providers.local_stt.provider import LocalSTTProvider
             registry.register(LocalSTTProvider())
         except Exception as e:
             log.error("provider_load_failed", provider="local_stt", error=str(e))
+
+    if settings.enable_provider_video_editor:
+        try:
+            from src.modules.providers.video_editor.provider import VideoAssemblerProvider
+            registry.register(VideoAssemblerProvider())
+        except Exception as e:
+            log.error("provider_load_failed", provider="video_editor", error=str(e))
+
+    if settings.enable_provider_orchestrator:
+        try:
+            from src.modules.providers.orchestrator.provider import CrewAIOrchestratorProvider
+            registry.register(CrewAIOrchestratorProvider())
+        except Exception as e:
+            log.error("provider_load_failed", provider="orchestrator", error=str(e))
 
     # Initialize all loaded providers (loads models into GPU/memory)
     for pid in registry.list_provider_ids():
@@ -139,8 +162,8 @@ class WorkerSettings:
     on_shutdown = shutdown
     redis_settings = get_arq_redis_settings()
 
-    # Priority queues — worker drains "high" before "normal" before "low"
-    queues = ["high", "normal", "low"]
+    # Use default queue 'arq:queue'
+    # queues = ["arq:queue:high", "arq:queue:normal", "arq:queue:low"]
     queue_read_limit = 10
 
     # Global concurrency limit (overridden per modality by ModalityScheduler)

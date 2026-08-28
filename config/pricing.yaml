@@ -1,0 +1,57 @@
+# Precios de referencia para calcular el costo de cada llamada.
+#
+# Por qué esto existe: ningún upstream devuelve el costo. CLIProxyAPI no lo
+# calcula, y los adaptadores que leían `usage.cost_usd` del cuerpo obtenían
+# 0.0 siempre, sin enterarse. El costo se calcula acá o no se calcula.
+#
+# Unidades: USD por 1.000.000 de tokens.
+#
+# Sobre `charged`. El acceso por OAuth va contra una suscripción ya pagada, así
+# que el costo marginal de una llamada es cero. Igual se calcula el precio de
+# lista: es lo que costaría por API, y sirve para dos cosas — dimensionar qué
+# tan cara sería la misma carga sin las suscripciones, y comparar modelos entre
+# sí. Se registra en `cost_usd_equivalent`; `cost_usd` sólo se llena cuando la
+# llamada se paga de verdad.
+#
+# Los precios envejecen. Se versionan a propósito para que un cambio se vea en
+# el diff y no altere en silencio las cifras históricas.
+
+version: 1
+currency: USD
+updated: 2026-08-27
+
+# Modo de cobro por tipo de credencial.
+billing:
+  oauth: {charged: false}    # suscripción (Gemini, Codex, Claude vía CLI)
+  api_key: {charged: true}   # se paga por token
+
+# Precio exacto por id de modelo. Gana sobre todo lo demás.
+models:
+  gpt-5.4-mini: {input: 0.25, output: 2.00}
+  gpt-5.5: {input: 1.25, output: 10.00}
+  gpt-5.6-luna: {input: 1.25, output: 10.00}
+  gpt-5.6-terra: {input: 1.25, output: 10.00}
+  gpt-5.6-sol: {input: 1.25, output: 10.00}
+  gemini-3-flash: {input: 0.30, output: 2.50}
+  gemini-3.1-flash-lite: {input: 0.10, output: 0.40}
+  gemini-3.1-pro-low: {input: 1.25, output: 10.00}
+  claude-sonnet-4-6: {input: 3.00, output: 15.00}
+  claude-opus-4-6: {input: 15.00, output: 75.00}
+
+# Por familia, cuando el id exacto no está listado. Evita que un modelo nuevo
+# quede sin precio sólo por haberse renombrado.
+families:
+  google: {input: 0.30, output: 2.50}
+  openai: {input: 1.25, output: 10.00}
+  anthropic: {input: 3.00, output: 15.00}
+  antigravity: {input: 0.30, output: 2.50}
+  # Los modelos locales no cuestan por token: la máquina ya está encendida. Se
+  # listan explícitamente en cero, y no se dejan fuera, para que no disparen
+  # `gateway_llm_unpriced_total` — ese contador tiene que señalar huecos en esta
+  # tabla, no modelos que legítimamente son gratis.
+  local: {input: 0, output: 0}
+
+# Imagen: precio por imagen, no por token.
+images:
+  gpt-image-2: {per_image: 0.04}
+  gemini-3.1-flash-image: {per_image: 0.03}

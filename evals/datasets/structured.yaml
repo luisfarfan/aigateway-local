@@ -1,0 +1,90 @@
+# Casos de salida estructurada, elegidos por dónde se rompen los modelos.
+#
+# No son ejemplos bonitos: cada uno reproduce un modo de fallo observado detrás
+# de CLIProxyAPI. Si un modelo pasa estos, pasa lo que le vamos a pedir.
+#
+# `expect` son afirmaciones sobre el objeto ya validado. Que valide contra el
+# schema es condición necesaria pero no suficiente: un modelo puede devolver un
+# JSON correcto con el contenido equivocado.
+
+version: 1
+
+cases:
+  - id: enum_valores_raros
+    why: >
+      Un enum con valores que no son palabras naturales. Es donde el modelo
+      inventa: contesta 'Technology' donde el contrato dice 'science_tech'.
+    prompt: "Clasifica esta noticia: 'Nvidia presenta su nueva GPU para centros de datos'"
+    schema:
+      type: object
+      properties:
+        titulo: {type: string}
+        categoria: {type: string, enum: [science_tech, sports_fit, money_biz]}
+      required: [titulo, categoria]
+    expect:
+      categoria: science_tech
+
+  - id: union_discriminada
+    why: >
+      `oneOf` + `discriminator` con `const` como discriminante. El modo de fallo
+      medido en F2: el modelo pone una descripción en prosa donde va la
+      constante.
+    prompt: "Genera una ficha con exactamente 2 secciones de texto sobre las GPUs de Nvidia."
+    schema:
+      type: object
+      properties:
+        secciones:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  tipo: {const: txt_blk}
+                  cuerpo: {type: string}
+                required: [tipo, cuerpo]
+              - type: object
+                properties:
+                  tipo: {const: img_blk}
+                  alt: {type: string}
+                required: [tipo, alt]
+            discriminator: {propertyName: tipo}
+      required: [secciones]
+    expect:
+      secciones_len: 2
+      secciones_tipos: [txt_blk, txt_blk]
+
+  - id: anidado_con_nulos
+    why: >
+      Objeto anidado con un campo opcional. Comprueba que el modelo no invente
+      un valor cuando no lo hay, y que la validación acepte la omisión — el
+      schema estricto se manda, pero se valida contra el original.
+    prompt: "Extrae los datos de: 'iPhone 15 Pro, marca Apple, precio no disponible'"
+    schema:
+      type: object
+      properties:
+        producto:
+          type: object
+          properties:
+            nombre: {type: string}
+            marca: {type: string}
+          required: [nombre, marca]
+        precio: {type: [number, "null"]}
+      required: [producto]
+    expect:
+      producto_marca: Apple
+      precio_nulo: true
+
+  - id: array_de_enteros
+    why: >
+      Tipos numéricos. Un modelo que devuelve "3" en vez de 3 pasa una
+      inspección visual y falla la validación.
+    prompt: "Dame los primeros 5 números primos."
+    schema:
+      type: object
+      properties:
+        primos:
+          type: array
+          items: {type: integer}
+      required: [primos]
+    expect:
+      primos: [2, 3, 5, 7, 11]

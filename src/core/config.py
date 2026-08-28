@@ -102,6 +102,66 @@ class Settings(BaseSettings):
     # ─── Worker ───────────────────────────────────────────────────────────────
     worker_modalities: str = "text,audio,image,video,pipeline"
     worker_id: str = ""     # auto-generated at startup if empty
+    
+    # ─── Providers ────────────────────────────────────────────────────────────
+    enable_provider_stub: bool = True
+    enable_provider_diffusers: bool = False
+    enable_provider_local_llm: bool = False
+    enable_provider_local_tts: bool = False
+    enable_provider_local_stt: bool = False
+    enable_provider_orchestrator: bool = False
+    enable_provider_video_editor: bool = False
+    
+    enable_provider_cliproxy: bool = True
+
+    # --- CLIProxyAPI (modelos cloud por OAuth) ---
+    # La base NO lleva `/v1`: las rutas se construyen con su prefijo completo,
+    # y el cliente normaliza si igual viene puesto.
+    cliproxy_base_url: str = "http://localhost:8417"
+    cliproxy_api_key: str = ""
+    cliproxy_timeout_s: float = 120.0
+    # La imagen tarda mucho más que el chat: medido, entre 30 s y 148 s para la
+    # misma petición según la carga de arriba. Un timeout único cancelaría a
+    # mitad y gastaría la cuota sin traer nada.
+    cliproxy_image_timeout_s: float = 420.0
+    # Cada cuánto se refresca el mapa modelo → owned_by. No es un health check:
+    # el catálogo lista modelos muertos igual (ver docs/F0-VANILLA-CAPABILITIES.md).
+    cliproxy_catalog_ttl_s: float = 300.0
+    cliproxy_default_model: str = "gemini-3-flash"
+
+    # Cache de respuestas. La clave incluye el proyecto (X-Proxima-Project) para
+    # que la contabilidad de costos no se mezcle entre consumidores.
+    llm_cache_enabled: bool = True
+    llm_cache_ttl_s: int = 3600
+    llm_default_project: str = "default"
+
+    # ─── Observabilidad (F3) ──────────────────────────────────────────────────
+    # Langfuse acepta OTLP sobre HTTP con auth Basic. Sin claves, las trazas se
+    # generan igual pero no se exportan: el código que abre spans no tiene que
+    # saber si alguien escucha.
+    langfuse_otlp_endpoint: str = "http://localhost:3777/api/public/otel/v1/traces"
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    # Escribir el histórico en Postgres. Se apaga en tests y en cualquier
+    # despliegue sin base; la petición se sirve igual.
+    llm_history_enabled: bool = True
+
+    # ─── Routing (F4) ─────────────────────────────────────────────────────────
+    # El watchdog prueba los modelos de las cadenas y abre el circuito de los
+    # que no responden. `GET /v1/models` no sirve para esto: lista modelos con
+    # la credencial revocada igual que los vivos.
+    # Backend local. Es el último recurso de las cadenas: más lento, pero no
+    # depende de cuota ni de internet.
+    enable_backend_ollama: bool = True
+    ollama_timeout_s: float = 300.0
+
+    watchdog_enabled: bool = True
+    watchdog_interval_s: int = 900
+
+    # --- Local Engine Settings ---
+    ollama_base_url: str = "http://localhost:11434"
+    local_llm_backend: str = "ollama"
+    local_tts_engine: str = "xtts"
 
     @computed_field
     @property

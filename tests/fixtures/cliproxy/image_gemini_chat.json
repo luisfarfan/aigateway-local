@@ -1,0 +1,61 @@
+{
+  "case": "image_gemini_chat",
+  "why": "Imagen por Gemini: llega en message.images[0].image_url.url como data URI, no por /v1/images/generations.",
+  "expect": "ok",
+  "recorded_at": "2026-08-27T05:25:24+00:00",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "body": {
+      "model": "gemini-3.1-flash-image",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Genera una imagen: un cubo rojo simple"
+        }
+      ],
+      "max_tokens": 100
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "id": "EMqPap6VBtCDqtsPrpq_iAY",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gemini-3.1-flash-image",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "reasoning_content": null,
+            "tool_calls": null,
+            "images": [
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": {
+                    "__blob__": true,
+                    "prefix": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEBLAEsAAD/6xeISlAAAQAAA",
+                    "length": 874047,
+                    "sha256": "bd9a2847eecc552d1712024927ed10191bfea912ba3ab54b4132dba02befeb1b"
+                  }
+                },
+                "index": 0
+              }
+            ]
+          },
+          "finish_reason": "stop",
+          "native_finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "completion_tokens": 1514,
+        "total_tokens": 1524,
+        "prompt_tokens": 10
+      }
+    }
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "case": "websearch_gemini_native",
+  "why": "Websearch de Gemini que SI funciona en vanilla. Trae groundingMetadata — de ahi salen las fuentes que el path OpenAI-compatible descarta.",
+  "expect": "ok",
+  "recorded_at": "2026-08-27T05:24:27+00:00",
+  "request": {
+    "method": "POST",
+    "path": "/v1beta/models/gemini-3-flash:generateContent",
+    "body": {
+      "contents": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "text": "Precio actual del Bitcoin. Cita la URL de la fuente."
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "googleSearch": {}
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "candidates": [
+        {
+          "content": {
+            "role": "model",
+            "parts": [
+              {
+                "thoughtSignature": {
+                  "__blob__": true,
+                  "prefix": "EvgNCvUNARFNMg/eXzYLaOw19bIetJYG7S52qQKFga8W4jXRUH3mCMPpZvIBZEYj",
+                  "length": 2384,
+                  "sha256": "0b463b84fe5a6e189db24375225e9b3cf780d03c1e84f5e8629a4951d2eac5ea"
+                },
+                "text": "El precio actual del Bitcoin ronda los **$78,829 USD**, según los datos en tiempo real de [TradingView](https://es.tradingview.com/symbols/BTCUSD/). De manera similar, la plataforma [CoinMarketCap](https://coinmarketcap.com/es/currencies/bitcoin/) registra un valor aproximado de **$78,842.30 USD**.\n\n*Nota: El mercado de criptomonedas es altamente volátil y los precios cambian constantemente de un segundo a otro.*"
+              }
+            ]
+          },
+          "finishReason": "STOP",
+          "groundingMetadata": {
+            "webSearchQueries": [
+              "precio actual Bitcoin USD"
+            ],
+            "searchEntryPoint": {
+              "renderedContent": {
+                "__blob__": true,
+                "prefix": "<style>\n.container {\n  align-items: center;\n  border-radius: 8px",
+                "length": 4470,
+                "sha256": "b0ab9b9aa54ceeeaef446b7df5adb316fe57b0ffc9087ed9c291d68fb7a2ca4f"
+              }
+            },
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://es.tradingview.com/symbols/BTCUSD/",
+                  "title": "tradingview.com"
+                }
+              },
+              {
+                "web": {
+                  "uri": "https://coinmarketcap.com/es/currencies/bitcoin/",
+                  "title": "coinmarketcap.com"
+                }
+              }
+            ],
+            "groundingSupports": [
+              {
+                "segment": {
+                  "endIndex": 148,
+                  "text": "El precio actual del Bitcoin ronda los **$78,829 USD**, según los datos en tiempo real de [TradingView](https://es.tradingview.com/symbols/BTCUSD/)"
+                },
+                "groundingChunkIndices": [
+                  0
+                ]
+              },
+              {
+                "segment": {
+                  "startIndex": 150,
+                  "endIndex": 299,
+                  "text": "De manera similar, la plataforma [CoinMarketCap](https://coinmarketcap.com/es/currencies/bitcoin/) registra un valor aproximado de **$78,842.30 USD**"
+                },
+                "groundingChunkIndices": [
+                  1
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 181,
+        "candidatesTokenCount": 128,
+        "totalTokenCount": 963,
+        "thoughtsTokenCount": 654
+      },
+      "modelVersion": "gemini-3-flash",
+      "responseId": "CcqPaoTlKOGhz7IPlb_U-Qo"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "case": "websearch_gemini_openai_compat_UNSUPPORTED",
+  "why": "NEGATIVO a propósito: vanilla descarta el tool block y el modelo responde sin buscar. Justifica usar la superficie Gemini-nativa.",
+  "expect": "ok",
+  "recorded_at": "2026-08-27T05:24:23+00:00",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "body": {
+      "model": "gemini-3-flash",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Precio actual del Bitcoin. Cita la URL."
+        }
+      ],
+      "max_tokens": 250,
+      "tools": [
+        {
+          "type": "web_search"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "id": "BcqPaur-KIXAz7IP2Y2tgQU",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gemini-3-flash",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "No puedo proporcionarte el precio actual del Bitcoin en tiempo real, ya que no tengo acceso a datos financieros actualizados al instante. \n\nPara ver el precio en tiempo real, puedes consultar fuentes financieras confiables como:\n*   [CoinMarketCap](https://coinmarketcap.com/es/currencies/bitcoin/)\n*   [CoinGecko](https://www.coingecko.com/es/monedas/bitcoin)",
+            "reasoning_content": null,
+            "tool_calls": null
+          },
+          "finish_reason": "stop",
+          "native_finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "completion_tokens": 91,
+        "total_tokens": 491,
+        "prompt_tokens": 11,
+        "completion_tokens_details": {
+          "reasoning_tokens": 389
+        }
+      }
+    }
+  }
+}

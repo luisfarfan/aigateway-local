@@ -1,0 +1,36 @@
+# Servicio de usuario para dejar el gateway sirviendo a la red del WiFi.
+#
+# Instalar:
+#   mkdir -p ~/.config/systemd/user
+#   cp ops/aigateway.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now aigateway
+#
+# Para que siga corriendo con la sesión cerrada (si no, systemd lo mata al salir):
+#   sudo loginctl enable-linger $USER
+#
+# Ver logs:      journalctl --user -u aigateway -f
+# Reiniciar:     systemctl --user restart aigateway
+# Apagar:        systemctl --user disable --now aigateway
+
+[Unit]
+Description=Proxima AI Gateway
+# Los contenedores (cliproxy, postgres, redis, minio, langfuse) los levanta
+# docker compose aparte; esto sólo espera a que la red esté lista.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/projects/aigateway-local
+EnvironmentFile=%h/projects/aigateway-local/.env
+# Postgres y MinIO salieron por puertos no estándar porque los de siempre están
+# ocupados en esta máquina. Ver docs/F3-OBSERVABILITY.md.
+Environment=POSTGRES_PORT=5442
+Environment=MINIO_ENDPOINT=http://localhost:9010
+ExecStart=%h/projects/aigateway-local/.venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

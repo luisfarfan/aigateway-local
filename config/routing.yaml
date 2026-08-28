@@ -1,0 +1,95 @@
+# Cadenas de modelos por capacidad, y cuándo saltar al siguiente.
+#
+# Una cadena es una lista ordenada de candidatos. Se prueba el primero; si falla
+# por algo que otro modelo podría resolver, se prueba el siguiente. Si el cliente
+# nombró un modelo, ese va primero y la cadena queda como red debajo.
+#
+# El nombre del modelo que realmente respondió sale en la respuesta, así que un
+# fallback nunca es silencioso.
+
+version: 1
+
+routes:
+  chat:
+    - gemini-3-flash
+    - gpt-5.4-mini
+    - claude-sonnet-4-6
+    # Último recurso: corre en la GPU de esta máquina. Más lento y más limitado,
+    # pero no depende de cuota ni de internet. Cuando se agota todo lo cloud,
+    # esto sigue respondiendo.
+    - ollama/qwen2.5:7b
+  websearch:
+    # Gemini primero por las FUENTES, no por la calidad del texto.
+    #
+    # Medido: la superficie nativa de Gemini devuelve `groundingChunks` con uri
+    # y título de forma consistente. Codex las expone como `url_citation` en las
+    # anotaciones de la Responses API, pero a menudo cita en prosa sin emitir la
+    # anotación — y una respuesta con fuentes vacías obliga a quien la consume a
+    # parsear el texto, que es justo lo que este gateway existe para evitar.
+    #
+    # Codex queda de segundo: sigue buscando bien, sólo que no siempre se puede
+    # saber de dónde sacó lo que dice.
+    - gemini-3-flash
+    - gpt-5.4-mini
+  structured:
+    - gemini-3-flash
+    - gpt-5.4-mini
+    - ollama/qwen2.5:7b
+  image:
+    - gemini-3.1-flash-image
+    - gpt-image-2
+  embeddings:
+    # Sólo local: CLIProxyAPI no expone `/v1/embeddings` (comprobado contra la
+    # instancia, devuelve vacío). Y es donde más sentido tiene: para un RAG se
+    # calculan por millares, no cuestan cuota y no salen de la máquina.
+    #
+    # El orden sale de medir, con "el gato duerme en el sofá" / "the cat sleeps
+    # on the sofa" / "la bolsa subió 3% ayer". Similitud coseno del par que
+    # debería parecerse, contra el que no:
+    #
+    #   bge-m3               0.849 vs 0.294   correcto, 1024 dims
+    #   qwen3-embedding:0.6b 0.796 vs 0.266   correcto, 1024 dims
+    #   nomic-embed-text     0.355 vs 0.601   INVERTIDO
+    #
+    # nomic-embed-text es monolingüe inglés y espera prefijos de tarea
+    # (`search_document:`, `search_query:`); sin ellos y con español da un
+    # resultado que parece funcionar y no funciona. Queda fuera de la cadena.
+    - ollama/bge-m3
+    - ollama/qwen3-embedding:0.6b
+
+# Qué fallos justifican probar otro modelo.
+#
+# Deliberadamente NO está `invalid_request`: si la petición está mal formada,
+# el siguiente modelo la rechaza igual y sólo se gasta cuota y latencia para
+# llegar al mismo 400.
+fallback_on:
+  - upstream_unavailable   # 429, 5xx, cooldown — el modelo está saturado
+  - unsupported_capability # el backend no puede hacer eso (Ollama y websearch)
+  - upstream_timeout       # se agotó la espera
+  - no_credential          # ninguna cuenta cubre ese modelo
+  - invalid_output         # el guard agotó los intentos; otro modelo puede acertar
+
+# Corta el tráfico hacia un modelo que viene fallando, para no gastar la cuota
+# ni la latencia de descubrirlo en cada petición. El estado vive en Redis
+# porque la API y los workers son procesos distintos: un breaker por proceso
+# haría que cada uno tenga que quemarse por su cuenta.
+watchdog:
+  # Rutas que el watchdog NO sondea.
+  #
+  # La sonda es una llamada de chat de pocos tokens, y un modelo de sólo imagen
+  # (gpt-image-2) la rechaza con un 503 aunque esté perfectamente vivo: sólo
+  # existe en /v1/images/generations. Sondearlo con chat lo marcaría muerto y
+  # abriría su circuito, rompiendo la ruta de imagen entera.
+  #
+  # Sondear imagen "de verdad" costaría generar una imagen por barrido, que es
+  # caro y lento. Se deja fuera: los modelos de imagen se descartan por fallos
+  # reales a través del breaker, no por sondeo.
+  skip_routes:
+    - image
+    # Un modelo de embeddings tampoco responde a una llamada de chat.
+    - embeddings
+
+circuit_breaker:
+  window_s: 60          # ventana en la que se cuentan los fallos
+  failure_threshold: 5  # fallos en la ventana que abren el circuito
+  open_for_s: 120       # cuánto queda cerrado el paso antes de reintentar

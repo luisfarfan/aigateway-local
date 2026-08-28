@@ -49,3 +49,6 @@ migrations/__pycache__/
 # Logs
 *.log
 logs/
+
+# CLIProxyAPI — lleva secret-key y api-keys en claro (el binario no interpola env)
+docker/cliproxy/config.yaml
