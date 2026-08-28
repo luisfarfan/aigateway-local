@@ -18,7 +18,9 @@ Dos detalles que parecen menores y no lo son:
 
 from __future__ import annotations
 
+import json
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -168,12 +170,16 @@ class CliproxyClient:
         model: str,
         max_tokens: int = 4096,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
     ) -> LLMResult:
         request = translate.chat_request(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             response_format=response_format,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         payload = await self._request("POST", request.path, request.body)
         return translate.parse_chat(payload, model=model)
@@ -203,6 +209,50 @@ class CliproxyClient:
         request = translate.image_request(model=model, prompt=prompt, size=size, quality=quality)
         payload = await self._request("POST", request.path, request.body)
         return translate.parse_image(payload, model=model)
+
+    @asynccontextmanager
+    async def stream_chat(
+        self,
+        messages: list[translate.Message],
+        *,
+        model: str,
+        max_tokens: int = 4096,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+    ):
+        """Abre un stream SSE y cede los bytes crudos del upstream.
+
+        Se reenvían **sin reserializar**: cada proveedor mete campos propios en
+        los chunks (`native_finish_reason`, `system_fingerprint`), y reconstruir
+        el JSON sólo puede perderlos. El gateway se limita a mirarlos al pasar
+        para contabilizar tokens.
+
+        Es un context manager para que quien llama pueda decidir el fallback
+        **antes** de empezar a consumir: una vez sale el primer byte, ya no hay
+        vuelta atrás.
+        """
+        request = translate.chat_request(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            stream=True,
+        )
+        try:
+            async with self._client.stream("POST", request.path, json=request.body) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    try:
+                        payload = json.loads(body or b"{}")
+                    except ValueError:
+                        payload = {"error": {"message": body.decode()[:500]}}
+                    raise classify(response.status_code, payload, path=request.path)
+                yield response.aiter_bytes()
+        except httpx.TimeoutException as exc:
+            raise CliproxyTransportError(f"timeout en {request.path}") from exc
+        except httpx.HTTPError as exc:
+            raise CliproxyTransportError(f"fallo de transporte en {request.path}: {exc}") from exc
 
     async def embed(self, texts: list[str], *, model: str):
         """CLIProxyAPI no expone embeddings — comprobado contra la instancia:

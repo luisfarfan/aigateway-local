@@ -12,6 +12,8 @@ Cuando se agota todo lo demás, esto sigue respondiendo.
 
 from __future__ import annotations
 
+import json
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -85,12 +87,16 @@ class OllamaBackend:
         model: str,
         max_tokens: int = 4096,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
     ) -> LLMResult:
         request = translate.chat_request(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             response_format=response_format,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         payload = await self._post(request.path, request.body)
         return translate.parse_chat(payload, model=model)
@@ -113,6 +119,40 @@ class OllamaBackend:
         raise BackendCapabilityError(
             f"Ollama no genera imágenes (modelo {model!r}); el routing debe probar otro candidato"
         )
+
+    @asynccontextmanager
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        *,
+        model: str,
+        max_tokens: int = 4096,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+    ):
+        """Igual que el camino cloud: Ollama también habla SSE en esta ruta."""
+        request = translate.chat_request(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            stream=True,
+        )
+        try:
+            async with self._client.stream("POST", request.path, json=request.body) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    try:
+                        payload = json.loads(body or b"{}")
+                    except ValueError:
+                        payload = {"error": {"message": body.decode()[:500]}}
+                    raise classify(response.status_code, payload, path=f"ollama{request.path}")
+                yield response.aiter_bytes()
+        except httpx.TimeoutException as exc:
+            raise CliproxyTransportError(f"timeout en ollama{request.path}") from exc
+        except httpx.HTTPError as exc:
+            raise CliproxyTransportError(f"ollama inalcanzable: {exc}") from exc
 
     async def embed(self, texts: list[str], *, model: str) -> EmbeddingResult:
         """Embeddings locales. Es donde tienen más sentido: no cuestan cuota, no

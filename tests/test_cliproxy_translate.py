@@ -289,3 +289,69 @@ def test_codex_sin_anotaciones_sigue_marcando_que_busco():
 
     assert result.searched is True
     assert result.sources == []
+
+
+# ─── Function calling ─────────────────────────────────────────────────────────
+
+
+def test_las_herramientas_de_funcion_se_reenvian_tal_cual():
+    """Bug encontrado con el gateway ya en la red: `tools` no se reenviaba, así
+    que el modelo respondía "no tengo acceso a esa herramienta" y cualquier
+    agente se quedaba sin su siguiente paso. Se pasan verbatim: su forma ya es
+    la de OpenAI, reescribirlas sólo podría estropearlas."""
+    tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+    request = chat_request(
+        model="m",
+        messages=[{"role": "user", "content": "x"}],
+        tools=tools,
+        tool_choice="auto",
+    )
+    assert request.body["tools"] == tools
+    assert request.body["tool_choice"] == "auto"
+
+
+def test_sin_tools_no_se_ensucia_el_cuerpo():
+    """Mandar `tools: []` no es lo mismo que no mandarlo: algunos proveedores
+    tratan la lista vacía como 'usa herramientas' y se confunden."""
+    request = chat_request(model="m", messages=[], tools=None)
+    assert "tools" not in request.body
+    assert "tool_choice" not in request.body
+
+
+def test_parse_chat_recupera_los_tool_calls():
+    payload = {
+        "model": "gpt-5.4-mini",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"city":"Lima"}'},
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+    result = parse_chat(payload, model="gpt-5.4-mini")
+    assert result.tool_calls[0]["function"]["name"] == "get_weather"
+
+
+def test_el_finish_reason_avisa_que_hay_que_ejecutar_herramientas():
+    """No es decorativo: un cliente agéntico decide si ejecuta o termina
+    mirando este campo. Con `stop` fijo, el agente da la conversación por
+    cerrada y nunca llama a la herramienta."""
+    from src.modules.providers.cliproxy.translate import LLMResult
+
+    con_tools = to_openai_chat_completion(
+        LLMResult(text="", model="m", tool_calls=[{"id": "c1", "type": "function"}])
+    )
+    sin_tools = to_openai_chat_completion(LLMResult(text="hola", model="m"))
+
+    assert con_tools["choices"][0]["finish_reason"] == "tool_calls"
+    assert con_tools["choices"][0]["message"]["tool_calls"][0]["id"] == "c1"
+    assert sin_tools["choices"][0]["finish_reason"] == "stop"

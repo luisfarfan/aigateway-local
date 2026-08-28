@@ -48,6 +48,8 @@ class Backend(Protocol):
         model: str,
         max_tokens: int = 4096,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
     ) -> LLMResult: ...
 
     async def search(
@@ -64,3 +66,15 @@ class Backend(Protocol):
     ) -> LLMResult: ...
 
     async def embed(self, texts: list[str], *, model: str) -> EmbeddingResult: ...
+
+    def stream_chat(
+        self,
+        messages: list[Message],
+        *,
+        model: str,
+        max_tokens: int = 4096,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+    ) -> Any:
+        """Context manager asíncrono que cede los bytes SSE del upstream."""
+        ...

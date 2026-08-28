@@ -571,6 +571,7 @@ de esta máquina.
 - [Plano síncrono `/v1/*`](#plano-síncrono-v1)
   - [Autenticación](#autenticación) · [Chat](#chat) · [Búsqueda web](#búsqueda-web)
   - [Visión](#visión) · [Salida estructurada](#salida-estructurada) · [Imágenes](#imágenes)
+  - [Streaming](#streaming) · [Function calling](#function-calling)
   - [Embeddings](#embeddings) · [Modelos locales](#modelos-locales)
   - [Errores](#errores-y-reintentos)
 - [Plano de jobs `/api/v1/jobs`](#plano-de-jobs-apiv1jobs)
@@ -580,7 +581,7 @@ de esta máquina.
 - [SDK de Python](#sdk-de-python)
 - [Observabilidad](#observabilidad)
 - [Comparar modelos](#comparar-modelos-evals)
-- [Servicio nativo](#servicio-nativo-que-funcione-siempre)
+- [Clientes agénticos](#clientes-agénticos) · [Servicio nativo](#servicio-nativo-que-funcione-siempre)
 - [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
 - [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
 
@@ -659,6 +660,7 @@ Sin él, todo el gasto cae en un mismo balde y los reportes no sirven.
 | `X-Proxima-Project` | dimensiona costo y trazas |
 | `X-Proxima-No-Cache` | salta el cache en esta llamada |
 | `X-Proxima-Client` | etiqueta libre para el histórico |
+| `X-Proxima-No-Fallback` | falla en vez de probar el siguiente modelo de la cadena |
 
 ### Búsqueda web
 
@@ -828,6 +830,65 @@ gastando la cuota sin traer nada.
 
 Para lotes o cuando no quieras esperar, usa el [plano de jobs](#plano-de-jobs-apiv1jobs):
 la imagen queda como artefacto en MinIO con URL firmada.
+
+### Streaming
+
+```json
+{"messages": [{"role": "user", "content": "..."}], "stream": true}
+```
+
+Devuelve SSE estándar (`text/event-stream`) con los chunks **del upstream, sin
+reserializar**: cada proveedor mete campos propios (`native_finish_reason`,
+`system_fingerprint`) y reconstruir el JSON sólo podría perderlos. La cabecera
+`X-Proxima-Served-By` dice qué modelo respondió, porque en streaming el cuerpo no es
+nuestro.
+
+Es un camino más estrecho que el normal, por razones que no son pereza:
+
+| | por qué |
+|---|---|
+| **Fallback sólo hasta el primer byte** | después, cambiar de modelo cosería una respuesta de dos modelos distintos. La cadena se recorre al abrir el stream; a partir de ahí, lo que salga sale |
+| **`response_format` no se acepta** → 400 | no se puede validar contra un schema lo que aún no terminó de llegar |
+| **Búsqueda web no se acepta** → 501 | usa superficies que no emiten SSE (la nativa de Gemini, `/v1/responses`) |
+| **Sin cache** | guardar exigiría acumular la respuesta entera, lo contrario de lo pedido |
+
+Los tokens **sí** se contabilizan: el gateway manda `stream_options.include_usage` y
+lee el `usage` del último chunk. Se cuenta incluso si el cliente corta a mitad — quien
+abandona el turno igual consumió.
+
+### Function calling
+
+Las herramientas de función viajan **verbatim**, en la forma estándar de OpenAI:
+
+```json
+{
+  "messages": [{"role": "user", "content": "¿Qué tiempo hace en Lima?"}],
+  "tools": [{"type": "function", "function": {
+      "name": "get_weather",
+      "parameters": {"type": "object", "properties": {"city": {"type": "string"}},
+                     "required": ["city"]}}}],
+  "tool_choice": "auto"
+}
+```
+
+La respuesta trae `tool_calls` y, sobre todo, `finish_reason: "tool_calls"` — que es
+el campo por el que un agente decide si ejecutar herramientas o dar el turno por
+cerrado:
+
+```json
+{"choices": [{"finish_reason": "tool_calls",
+  "message": {"role": "assistant", "content": null, "tool_calls": [
+    {"id": "call_1", "type": "function",
+     "function": {"name": "get_weather", "arguments": "{\"city\":\"Lima\"}"}}]}}]}
+```
+
+El round-trip multi-turno funciona: se devuelve el mensaje del asistente más uno con
+`role: "tool"` y su `tool_call_id`, y el modelo cierra con la respuesta final.
+
+**Búsqueda web y function calling se distinguen por el contenido de `tools`.** Si
+todas las entradas son de búsqueda, va por la superficie nativa del proveedor. Si hay
+al menos una función, va por el camino de chat con todo reenviado — la superficie
+nativa de búsqueda de Gemini no acepta funciones y las perdería en silencio.
 
 ### Embeddings
 
@@ -1288,6 +1349,32 @@ unitario veía, porque el schema estricto no llevaba `type` en los nodos `const`
 
 ---
 
+## Clientes agénticos
+
+Un agente con bucle de herramientas (tipo Strix) pide cosas que un chat simple no.
+Lo que conviene saber antes de apuntarlo aquí:
+
+**1. Nombra el modelo explícitamente.** La cadena de `chat` termina en
+`ollama/qwen2.5:7b` como red de seguridad. Para una respuesta suelta está bien; para
+un bucle agéntico es mal candidato — daría muchos turnos de ruido en vez de fallar
+rápido. Un modelo nombrado va **primero** en la cadena, y si además quieres que falle
+en vez de degradar:
+
+```
+X-Proxima-No-Fallback: 1
+```
+
+**2. Comprueba quién respondió.** En JSON está en `model`, y si hubo salto,
+`proxima.fell_back_from`. En streaming, la cabecera `X-Proxima-Served-By`.
+
+**3. Desde un contenedor, `localhost` no es esta máquina.** Si el agente corre en su
+propio Docker, apunta a la IP de la LAN (`http://192.168.1.12:8000`), no a
+`localhost` ni a `127.0.0.1`.
+
+**4. Streaming y salida estructurada son excluyentes.** Ver [Streaming](#streaming).
+
+---
+
 ## Servicio nativo (que funcione siempre)
 
 Los contenedores llevan `restart: unless-stopped`, así que vuelven solos al reiniciar
@@ -1521,6 +1608,8 @@ Probado end-to-end contra el gateway expuesto en la red, con modelos reales:
 | | |
 |---|---|
 | chat, búsqueda con fuentes, visión, salida estructurada | ✅ |
+| streaming SSE, con tokens contabilizados | ✅ |
+| function calling multi-turno (`tool_calls` → `role: tool` → respuesta) | ✅ |
 | imagen por `/v1/*` y por jobs (con artefacto en MinIO) | ✅ |
 | embeddings (`bge-m3`, 1024 dims) | ✅ |
 | modelos locales de Ollama, y fallback cloud → local | ✅ |

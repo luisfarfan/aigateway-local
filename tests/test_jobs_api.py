@@ -2,6 +2,7 @@
 Integration tests for the jobs API endpoints.
 Uses the test client with SQLite + stub provider (no real infrastructure needed).
 """
+
 import pytest
 from httpx import AsyncClient
 

@@ -15,11 +15,13 @@ ni siquiera funciona por la superficie OpenAI (ver `translate.py`).
 from __future__ import annotations
 
 import json
+from contextlib import AsyncExitStack
+from dataclasses import replace
 from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.modules.auth.middleware import get_current_client_id
@@ -74,6 +76,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[dict[str, Any]]
     max_tokens: int = 4096
     tools: list[dict[str, Any]] | None = None
+    tool_choice: Any = None
     stream: bool = False
     # Forma estándar de OpenAI. Mandarla activa el guard: el gateway se encarga
     # de que el schema se cumpla también en los proveedores que descartan este
@@ -120,7 +123,25 @@ def _resolve(registry: BackendRegistry, model: str):
 
 
 def _wants_websearch(tools: list[dict[str, Any]] | None) -> bool:
-    return any((tool or {}).get("type") in _WEBSEARCH_TOOL_TYPES for tool in tools or [])
+    """True sólo si TODOS los tools son de búsqueda web.
+
+    Si el cliente además manda herramientas de función, la petición es de
+    function calling y va por el camino de chat: la superficie nativa de
+    búsqueda de Gemini no acepta funciones, así que enrutar ahí las perdería
+    en silencio — que es exactamente el fallo que este método arregla.
+    """
+    entries = [tool or {} for tool in tools or []]
+    if not entries:
+        return False
+    return all(entry.get("type") in _WEBSEARCH_TOOL_TYPES for entry in entries)
+
+
+def _function_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Las herramientas que no son de búsqueda, para reenviarlas tal cual."""
+    functions = [
+        tool for tool in tools or [] if (tool or {}).get("type") not in _WEBSEARCH_TOOL_TYPES
+    ]
+    return functions or None
 
 
 # Cómo se traduce cada fallo a HTTP. El código importa porque es lo que un
@@ -204,7 +225,20 @@ def _json_schema_of(response_format: dict[str, Any] | None) -> tuple[dict[str, A
 
 
 def _routing(request: Request) -> tuple[RoutingTable, CircuitBreaker]:
+    """Tabla de rutas y breaker, respetando `X-Proxima-No-Fallback`.
+
+    Para qué la cabecera: la cadena de `chat` termina en un modelo local
+    pequeño, que como red de seguridad está bien para una respuesta suelta pero
+    es mal candidato para un bucle agéntico — produciría muchos turnos de ruido
+    caro en vez de fallar rápido. Un cliente que prefiere el error explícito lo
+    pide con esta cabecera.
+
+    Se implementa vaciando `fallback_on`, no la cadena: los circuitos abiertos
+    se siguen respetando, que es protección y no elección de modelo.
+    """
     table = load_routing()
+    if request.headers.get("X-Proxima-No-Fallback"):
+        table = replace(table, fallback_on=frozenset())
     return table, CircuitBreaker(table.breaker)
 
 
@@ -382,20 +416,207 @@ async def _structured(
     return payload
 
 
-@router.post("/v1/chat/completions", summary="Chat (con o sin búsqueda web)")
-async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any:
-    if body.stream:
+def _usage_from_chunk(raw: bytes, state: dict[str, Any]) -> None:
+    """Mira los chunks al pasar para contabilizar, sin tocarlos.
+
+    El `usage` llega en el último chunk gracias a `stream_options.include_usage`.
+    Sin esto, una petición en streaming no aparecería en el reporte de costos —
+    un agujero que crece justo con los clientes que más consumen.
+    """
+    for line in raw.split(b"\n"):
+        if not line.startswith(b"data: "):
+            continue
+        payload = line[6:].strip()
+        if not payload or payload == b"[DONE]":
+            continue
+        try:
+            chunk = json.loads(payload)
+        except ValueError:
+            continue
+        if model := chunk.get("model"):
+            state["model"] = model
+        if usage := chunk.get("usage"):
+            state["prompt_tokens"] = int(usage.get("prompt_tokens") or 0)
+            state["completion_tokens"] = int(usage.get("completion_tokens") or 0)
+
+
+async def _stream_guarded(
+    request: Request,
+    body: ChatCompletionRequest,
+    obs: Observation,
+    structured: tuple[dict[str, Any], str] | None,
+    websearch: bool,
+) -> Any:
+    """Rechaza lo que no se puede servir por SSE, y delega el resto.
+
+    Las dos negativas se responden **antes** de abrir nada, así que aquí sí se
+    puede usar `observe` de la forma normal.
+    """
+    if structured:
+        # Pedir las dos cosas es contradictorio: no se puede validar contra un
+        # schema lo que aún no terminó de llegar. Mejor un 400 claro que
+        # ignorar una de las dos en silencio.
+        async with observe(obs):
+            obs.failed(
+                kind="invalid_request",
+                message="`stream` y `response_format` son incompatibles",
+                retryable=False,
+                outcome="invalid_request",
+            )
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": (
+                            "`stream` y `response_format` son incompatibles: la salida "
+                            "estructurada se valida entera, no por trozos"
+                        ),
+                        "type": "invalid_request",
+                        "retryable": False,
+                    }
+                },
+            )
+
+    if websearch:
+        async with observe(obs):
+            obs.failed(
+                kind="unsupported_capability",
+                message="la búsqueda web no se sirve en streaming",
+                retryable=False,
+                outcome="unsupported_capability",
+            )
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": {
+                        "message": (
+                            "la búsqueda web usa superficies que no emiten SSE; pídela sin `stream`"
+                        ),
+                        "type": "unsupported_capability",
+                        "retryable": False,
+                    }
+                },
+            )
+
+    return await _stream_completions(request, body, obs)
+
+
+async def _stream_completions(
+    request: Request, body: ChatCompletionRequest, obs: Observation
+) -> Any:
+    """Streaming SSE, con fallback sólo hasta el primer byte.
+
+    Tres cosas no se pueden hacer sobre un stream, y por eso este camino es más
+    estrecho que el normal:
+
+    - **Fallback a mitad no existe.** Una vez enviada la cabecera 200 y el
+      primer chunk, cambiar de modelo produciría una respuesta cosida de dos
+      modelos distintos. Se prueba la cadena mientras se abre el stream; a
+      partir del primer byte, lo que salga sale.
+    - **El guard no aplica.** No se puede validar contra un schema lo que aún
+      no ha terminado de llegar; pedir las dos cosas se rechaza con 400 en vez
+      de ignorar una en silencio.
+    - **El cache no participa.** Guardar exigiría acumular la respuesta entera,
+      que es lo contrario de lo que pidió el cliente.
+    """
+    registry = _backends(request)
+    table, breaker = _routing(request)
+    requested = _requested_model(request, table, "chat", body.model)
+    candidates = table.candidates("chat", requested)
+    tools = _function_tools(body.tools)
+
+    # El `observe` entra en ESTE stack, no en el del endpoint: si se cerrara al
+    # devolver la respuesta —que es lo que pasa con un `async with` en el
+    # endpoint— se registraría la petición antes de que fluyera un solo byte, y
+    # todo streaming quedaría con cero tokens y cero costo.
+    stack = AsyncExitStack()
+    await stack.enter_async_context(observe(obs))
+    chunks = None
+    served_by = None
+    last_error: Exception | None = None
+
+    for model in candidates:
+        if await breaker.is_open(model):
+            continue
+        try:
+            resolved = _resolve(registry, model)
+            obs.family = str(await resolved.backend.family_of(resolved.model))
+            obs.meta["backend"] = resolved.backend.name
+            chunks = await stack.enter_async_context(
+                resolved.backend.stream_chat(
+                    body.messages,
+                    model=resolved.model,
+                    max_tokens=body.max_tokens,
+                    tools=tools,
+                    tool_choice=body.tool_choice,
+                )
+            )
+            served_by = model
+            break
+        except Exception as exc:  # noqa: BLE001 — se clasifica abajo
+            last_error = exc
+            await breaker.record_failure(model)
+            if not table.should_fallback(routing_errors.kind_of(exc)):
+                break
+
+    if chunks is None:
+        await stack.aclose()
+        if last_error is not None:
+            obs.failed(**_failure_fields(last_error))
+            return _error_response(last_error)
+        obs.failed(
+            kind="no_candidates",
+            message="ningún modelo disponible para streaming",
+            retryable=True,
+            outcome="upstream_error",
+        )
         return JSONResponse(
-            status_code=400,
+            status_code=503,
             content={
                 "error": {
-                    "message": "streaming todavía no está soportado en el plano síncrono",
-                    "type": "invalid_request",
-                    "retryable": False,
+                    "message": "ningún modelo disponible",
+                    "type": "no_candidates",
+                    "retryable": True,
                 }
             },
         )
 
+    await breaker.record_success(served_by)
+    obs.meta["streaming"] = True
+    if served_by != candidates[0]:
+        obs.meta["fell_back_from"] = candidates[0]
+
+    state: dict[str, Any] = {"model": served_by, "prompt_tokens": 0, "completion_tokens": 0}
+
+    async def relay():
+        try:
+            async for raw in chunks:
+                _usage_from_chunk(raw, state)
+                yield raw
+        finally:
+            # El ORDEN importa: primero se llena la observación, después se
+            # cierra el stack — que es quien la publica. Al revés se registra
+            # una petición vacía y todo streaming aparece con cero tokens.
+            #
+            # Corre también si el cliente corta a mitad: un agente que abandona
+            # el turno igual consumió tokens, y deben quedar contabilizados.
+            obs.prompt_tokens = state["prompt_tokens"]
+            obs.completion_tokens = state["completion_tokens"]
+            obs.succeeded(model=state["model"])
+            await stack.aclose()
+
+    return StreamingResponse(
+        relay(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Proxima-Served-By": served_by,
+        },
+    )
+
+
+@router.post("/v1/chat/completions", summary="Chat (con o sin búsqueda web)")
+async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any:
     registry = _backends(request)
     table, breaker = _routing(request)
     structured = _json_schema_of(body.response_format)
@@ -409,6 +630,9 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
         requested_model=requested or (table.candidates(route) or ["?"])[0],
         client_id=_client_id_of(request),
     )
+
+    if body.stream:
+        return await _stream_guarded(request, body, obs, structured, websearch)
 
     async with observe(obs):
         if structured:
@@ -429,7 +653,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
                         body.messages, model=resolved.model, max_tokens=body.max_tokens
                     )
                 return await resolved.backend.chat(
-                    body.messages, model=resolved.model, max_tokens=body.max_tokens
+                    body.messages,
+                    model=resolved.model,
+                    max_tokens=body.max_tokens,
+                    tools=_function_tools(body.tools),
+                    tool_choice=body.tool_choice,
                 )
 
             call = attempt_chat

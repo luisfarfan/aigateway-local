@@ -57,6 +57,9 @@ class LLMResult:
     sources: list[Source] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
     searched: bool = False
+    # Function calling. Un agente decide su siguiente paso con esto: perderlo
+    # deja al cliente con un mensaje vacío y un bucle que no avanza.
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def total_tokens(self) -> int:
@@ -80,13 +83,31 @@ def chat_request(
     messages: list[Message],
     max_tokens: int = 4096,
     response_format: dict[str, Any] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any = None,
+    stream: bool = False,
 ) -> Request:
+    """Petición de chat. `tools` viaja tal cual: es function calling del cliente.
+
+    No confundir con la búsqueda web, que también llega como un bloque de tool
+    pero necesita traducción per-proveedor (`websearch_request`). Las
+    herramientas de función se pasan verbatim porque su forma ya es la de
+    OpenAI y el upstream la entiende: reescribirlas sólo podría estropearlas.
+    """
     body: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "stream": False,
+        "stream": stream,
     }
+    if stream:
+        # Sin esto el último chunk no trae `usage` y la petición queda sin
+        # contabilizar: streaming sería un agujero en el reporte de costos.
+        body["stream_options"] = {"include_usage": True}
+    if tools:
+        body["tools"] = tools
+    if tool_choice is not None:
+        body["tool_choice"] = tool_choice
     if response_format is not None:
         # Los proveedores que no lo entienden lo descartan sin quejarse, así que
         # mandarlo siempre es gratis. El contrato de verdad viaja además dentro
@@ -107,6 +128,7 @@ def parse_chat(payload: dict[str, Any], *, model: str) -> LLMResult:
         prompt_tokens=int(usage.get("prompt_tokens") or 0),
         completion_tokens=int(usage.get("completion_tokens") or 0),
         images=_chat_images(message),
+        tool_calls=[tc for tc in message.get("tool_calls") or [] if isinstance(tc, dict)],
     )
 
 
@@ -404,7 +426,9 @@ def to_openai_chat_completion(result: LLMResult) -> dict[str, Any]:
     cliente que hable OpenAI ignora la clave extra, y el que sí la conoce no
     tiene que reparsear el texto para recuperarlas.
     """
-    message: dict[str, Any] = {"role": "assistant", "content": result.text}
+    message: dict[str, Any] = {"role": "assistant", "content": result.text or None}
+    if result.tool_calls:
+        message["tool_calls"] = result.tool_calls
     if result.images:
         message["images"] = [
             {"type": "image_url", "image_url": {"url": url}, "index": i}
@@ -414,7 +438,15 @@ def to_openai_chat_completion(result: LLMResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "object": "chat.completion",
         "model": result.model,
-        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        # `finish_reason` no es decorativo: un cliente agéntico decide si
+        # ejecutar herramientas o terminar mirando este campo.
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": "tool_calls" if result.tool_calls else "stop",
+            }
+        ],
         "usage": {
             "prompt_tokens": result.prompt_tokens,
             "completion_tokens": result.completion_tokens,

@@ -7,6 +7,7 @@ Tests the 4 correctness properties without real Redis/MinIO:
   3. Timeout enforcement
   4. Retry with backoff
 """
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -53,6 +54,7 @@ async def test_stub_provider_emits_progress():
         pass
 
     from src.modules.providers.base import ExecutionContext
+
     ctx = ExecutionContext(
         job_id=uuid4(),
         job_type=JobType.IMAGE_GENERATION,
@@ -91,6 +93,7 @@ async def test_stub_provider_supports_cancellation():
         pass
 
     from src.modules.providers.base import ExecutionContext
+
     ctx = ExecutionContext(
         job_id=job_id,
         job_type=JobType.TEXT_GENERATION,
@@ -124,6 +127,7 @@ async def test_provider_result_success_structure():
         artifact_keys.append(key)
 
     from src.modules.providers.base import ExecutionContext
+
     job_id = uuid4()
     ctx = ExecutionContext(
         job_id=job_id,
@@ -155,23 +159,40 @@ async def test_timeout_enforced():
 
     class SlowProvider(BaseProvider):
         @property
-        def provider_id(self): return "slow"
+        def provider_id(self):
+            return "slow"
+
         @property
         def capability(self):
             from src.modules.providers.base import ProviderCapability
+
             return ProviderCapability("slow", list(JobType), [], Modality.TEXT)
-        def supports(self, *a): return True
-        async def initialize(self): pass
-        async def cancel(self, *a): return True
+
+        def supports(self, *a):
+            return True
+
+        async def initialize(self):
+            pass
+
+        async def cancel(self, *a):
+            return True
+
         async def execute(self, ctx):
             await asyncio.sleep(60)  # way longer than timeout
             return ProviderResult(success=True)
 
     job_id = uuid4()
     ctx = ExecutionContext(
-        job_id=job_id, job_type=JobType.TEXT_GENERATION, provider_id="slow",
-        model=None, input_payload={}, priority="normal", timeout_seconds=1,
-        worker_id="w", on_progress=AsyncMock(), on_artifact=AsyncMock(),
+        job_id=job_id,
+        job_type=JobType.TEXT_GENERATION,
+        provider_id="slow",
+        model=None,
+        input_payload={},
+        priority="normal",
+        timeout_seconds=1,
+        worker_id="w",
+        on_progress=AsyncMock(),
+        on_artifact=AsyncMock(),
     )
 
     with pytest.raises(asyncio.TimeoutError):
@@ -190,8 +211,10 @@ async def test_persist_artifact_creates_record(db_session):
 
     with (
         patch("workers.executor.storage.get_size", new=AsyncMock(return_value=1024)),
-        patch("workers.executor.storage.presigned_download_url",
-              new=AsyncMock(return_value="http://minio/test.png")),
+        patch(
+            "workers.executor.storage.presigned_download_url",
+            new=AsyncMock(return_value="http://minio/test.png"),
+        ),
     ):
         artifact = await _persist_artifact(
             job_id=job_id,

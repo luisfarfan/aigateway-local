@@ -11,6 +11,7 @@ según el tool que mande el cliente. La traducción en sí ya está cubierta en
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -76,6 +77,30 @@ def settings_aisladas():
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+class FakeStreamingBackend(FakeCliproxyClient):
+    """Backend que emite SSE como los upstreams reales."""
+
+    CHUNKS = [
+        b'data: {"model":"fake-1","choices":[{"delta":{"content":"ho"},'
+        b'"native_finish_reason":null}]}\n\n',
+        b'data: {"model":"fake-1","choices":[{"delta":{"content":"la"}}],'
+        b'"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+
+    @asynccontextmanager
+    async def stream_chat(self, messages, **kwargs):
+        self.calls.append("stream_chat")
+        if self._raises:
+            raise self._raises
+
+        async def gen():
+            for chunk in self.CHUNKS:
+                yield chunk
+
+        yield gen()
 
 
 class FakeSettings:
@@ -157,18 +182,105 @@ async def test_el_modelo_es_opcional():
 
 
 @pytest.mark.asyncio
-async def test_streaming_se_rechaza_explicitamente():
-    """Mejor un 400 claro que un 200 que no hace streaming."""
-    fake = FakeCliproxyClient()
+async def test_streaming_devuelve_los_chunks_del_upstream():
+    """Se reenvían sin reserializar: cada proveedor mete campos propios en los
+    chunks (`native_finish_reason`, `system_fingerprint`) y reconstruir el JSON
+    sólo puede perderlos."""
+    fake = FakeStreamingBackend()
+    transport = ASGITransport(app=build_app(fake))
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as http,
+        http.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+        ) as response,
+    ):
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        cuerpo = b"".join([chunk async for chunk in response.aiter_bytes()])
+
+    assert b"native_finish_reason" in cuerpo
+    assert b"[DONE]" in cuerpo
+
+
+@pytest.mark.asyncio
+async def test_streaming_dice_quien_lo_sirvio_en_una_cabecera():
+    """En streaming el cuerpo es del upstream, así que el dato va en cabecera:
+    quien pidió un modelo tiene derecho a saber cuál respondió."""
+    fake = FakeStreamingBackend()
+    transport = ASGITransport(app=build_app(fake))
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as http,
+        http.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+        ) as response,
+    ):
+        assert response.headers["x-proxima-served-by"]
+        async for _ in response.aiter_bytes():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_streaming_contabiliza_los_tokens_del_ultimo_chunk():
+    """`stream_options.include_usage` hace que el upstream mande el uso al
+    final. Sin leerlo, las peticiones en streaming serían un agujero en el
+    reporte de costos — y las abren justo los clientes que más consumen."""
+    from src.api.openai_compat.router import _usage_from_chunk
+
+    state = {"model": "x", "prompt_tokens": 0, "completion_tokens": 0}
+    _usage_from_chunk(
+        b'data: {"model":"gpt-5.4-mini","usage":{"prompt_tokens":11,"completion_tokens":7}}\n',
+        state,
+    )
+    assert state == {"model": "gpt-5.4-mini", "prompt_tokens": 11, "completion_tokens": 7}
+
+
+def test_un_chunk_roto_no_rompe_la_contabilidad():
+    """Un `data:` que no sea JSON no puede tumbar el stream entero."""
+    from src.api.openai_compat.router import _usage_from_chunk
+
+    state = {"model": "m", "prompt_tokens": 0, "completion_tokens": 0}
+    _usage_from_chunk(b"data: {esto no es json\ndata: [DONE]\n", state)
+    assert state["prompt_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_streaming_con_response_format_se_rechaza():
+    """Pedir las dos cosas es contradictorio: no se puede validar contra un
+    schema lo que aún no terminó de llegar. Mejor un 400 claro que ignorar una
+    de las dos en silencio."""
     response = await call(
-        build_app(fake),
+        build_app(FakeStreamingBackend()),
         "POST",
         "/v1/chat/completions",
-        json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+        json={
+            "messages": [{"role": "user", "content": "x"}],
+            "stream": True,
+            "response_format": RESPONSE_FORMAT,
+        },
     )
     assert response.status_code == 400
-    assert response.json()["error"]["retryable"] is False
-    assert fake.calls == []
+    assert "response_format" in response.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_con_busqueda_web_se_rechaza():
+    """La búsqueda usa superficies que no emiten SSE (la nativa de Gemini,
+    /v1/responses de OpenAI). Se dice, en vez de devolver un stream mudo."""
+    response = await call(
+        build_app(FakeStreamingBackend()),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "x"}],
+            "stream": True,
+            "tools": [{"type": "web_search"}],
+        },
+    )
+    assert response.status_code == 501
 
 
 # ─── Forma de la respuesta ────────────────────────────────────────────────────
@@ -540,3 +652,110 @@ async def test_cliproxy_declara_que_no_hace_embeddings():
     with pytest.raises(BackendCapabilityError):
         await client.embed(["hola"], model="gemini-3-flash")
     await client.aclose()
+
+
+# ─── Function calling ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_las_herramientas_de_funcion_no_activan_la_busqueda_web():
+    """La superficie nativa de búsqueda de Gemini no acepta funciones: enrutar
+    ahí una petición de function calling las perdería en silencio."""
+    fake = FakeCliproxyClient()
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "clima en Lima"}],
+            "tools": [{"type": "function", "function": {"name": "get_weather"}}],
+        },
+    )
+    assert response.status_code == 200
+    assert fake.calls == ["chat"]
+
+
+@pytest.mark.asyncio
+async def test_websearch_mas_funciones_va_por_chat():
+    """Si el cliente manda las dos cosas, manda function calling: es el camino
+    que sí puede transportar ambas."""
+    fake = FakeCliproxyClient()
+    await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [
+                {"type": "web_search"},
+                {"type": "function", "function": {"name": "f"}},
+            ],
+        },
+    )
+    assert fake.calls == ["chat"]
+
+
+@pytest.mark.asyncio
+async def test_el_streaming_queda_contabilizado_al_terminar():
+    """Dos veces se me escapó: primero porque `observe` se cerraba al devolver
+    la respuesta, antes de que fluyera un byte; después porque el `finally`
+    cerraba el registro antes de rellenarlo. En ambos casos el streaming salía
+    con cero tokens y cero costo — invisible salvo que se mire la base."""
+    from src.modules.observability import recorder
+
+    publicadas: list[Any] = []
+    original = recorder.Observation.succeeded
+
+    def espia(self, *, model=None):
+        original(self, model=model)
+        publicadas.append((self.prompt_tokens, self.completion_tokens, self.outcome))
+
+    recorder.Observation.succeeded = espia
+    try:
+        transport = ASGITransport(app=build_app(FakeStreamingBackend()))
+        async with (
+            AsyncClient(transport=transport, base_url="http://test") as http,
+            http.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+            ) as response,
+        ):
+            async for _ in response.aiter_bytes():
+                pass
+    finally:
+        recorder.Observation.succeeded = original
+
+    # El doble emite usage 5/2 en su último chunk.
+    assert publicadas == [(5, 2, "ok")]
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_falla_en_vez_de_degradar():
+    """Un bucle agéntico prefiere un error explícito a que le respondan veinte
+    turnos de ruido desde un modelo pequeño. La cadena de `chat` termina en uno
+    local justamente como red de seguridad, y esta cabecera la desactiva."""
+    fake = FakeCliproxyClient(raises=CliproxyRetryableError("429"))
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "x"}]},
+        headers={"X-Proxima-No-Fallback": "1"},
+    )
+    assert response.status_code == 503
+    assert fake.calls == ["chat"]  # un solo intento, sin recorrer la cadena
+
+
+@pytest.mark.asyncio
+async def test_sin_la_cabecera_si_recorre_la_cadena():
+    """Contraste con el test anterior: el comportamiento por defecto sigue
+    siendo intentar los demás candidatos."""
+    fake = FakeCliproxyClient(raises=CliproxyRetryableError("429"))
+    await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "x"}]},
+    )
+    assert len(fake.calls) > 1

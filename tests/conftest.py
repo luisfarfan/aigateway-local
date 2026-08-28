@@ -9,6 +9,7 @@ For now, fixtures provide an async test client with:
   - In-memory SQLite for DB (fast, no Docker needed for unit tests)
   - FakeRedis for pub/sub
 """
+
 import os
 
 # El `.env` del repo trae API_KEYS con claves de ejemplo, lo que apaga el modo
@@ -43,6 +44,7 @@ async def db_engine():
     async with engine.begin() as conn:
         # Import all models so SQLModel knows about them
         import src.modules.jobs.models  # noqa: F401
+
         await conn.run_sync(SQLModel.metadata.create_all)
     yield engine
     async with engine.begin() as conn:
@@ -58,6 +60,7 @@ async def db_session(db_engine):
 
 
 # ─── App client ───────────────────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession):
@@ -81,6 +84,7 @@ async def client(db_session: AsyncSession):
         async def enqueue_job(self, *args, **kwargs):
             class FakeJob:
                 job_id = "fake-arq-id"
+
             return FakeJob()
 
     app.state.provider_registry = registry
