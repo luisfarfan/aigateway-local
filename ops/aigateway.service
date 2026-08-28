@@ -1,0 +1,32 @@
+# Gateway de modelos — API en 0.0.0.0:8000.
+#
+# Servicio de usuario, no de sistema: corre con tu cuenta, tu venv y tu .env,
+# sin necesidad de root. Instalación en el README (sección "Servicio nativo").
+#
+# Por qué ExecStart pasa por bash en vez de usar EnvironmentFile:
+# systemd NO quita los comentarios que van en la misma línea que un valor. Con
+# un .env que trae `LOG_JSON=false  # true in production`, systemd le pasaría a
+# la app el string entero y pydantic fallaría al arrancar. Bash sí los ignora,
+# así que se deja que bash lea el archivo.
+
+[Unit]
+Description=Proxima AI Gateway (API)
+Documentation=https://github.com/luisfarfan/aigateway-local
+# Los contenedores los levanta docker con restart: unless-stopped. Esto sólo
+# espera a que docker esté listo; si Postgres aún no acepta conexiones, el
+# arranque falla y systemd reintenta (Restart=always).
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=/bin/bash -c 'set -a; . ./.env; set +a; exec .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000'
+Restart=always
+RestartSec=10
+# Si Postgres tarda en arrancar tras un reinicio, systemd reintentaría en bucle
+# y se rendiría. Con esto reintenta indefinidamente.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target

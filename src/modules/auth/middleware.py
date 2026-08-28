@@ -52,6 +52,9 @@ async def get_current_client_id(
         raw_key = bearer.credentials
     elif api_key_header is not None:
         raw_key = api_key_header
+    else:
+        # Fallback to query param for EventSource support
+        raw_key = request.query_params.get("api_key")
 
     if not raw_key or raw_key not in settings.valid_api_keys:
         log.warning(

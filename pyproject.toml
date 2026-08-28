@@ -13,11 +13,13 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "sse-starlette>=2.1.0",
+    "httpx>=0.27.0",                # cliente del provider cliproxy
     "python-multipart>=0.0.9",      # file uploads
 
     # Data / validation
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
+    "jsonschema>=4.20.0",           # valida la salida estructurada del guard
 
     # ORM / DB
     "sqlmodel>=0.0.21",
@@ -41,6 +43,16 @@ dependencies = [
 
     # Auth
     "python-jose[cryptography]>=3.3.0",
+
+    # Orchestration & Agents
+    "crewai>=0.28.0",
+    "crewai-tools>=0.1.0",
+    "langchain-community>=0.0.38",
+
+    # Video processing & Assembly
+    "moviepy>=1.0.3",
+    "pysrt>=1.1.2",
+    "imageio[ffmpeg]>=2.34.0",
 ]
 
 [project.optional-dependencies]
@@ -96,3 +108,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    # Necesitan una instancia real de CLIProxyAPI; se saltan sin CLIPROXY_API_KEY.
+    "e2e: llama a servicios reales por red",
+]

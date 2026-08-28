@@ -1,0 +1,31 @@
+# CLIProxyAPI — instancia de este gateway (F0: grabar fixtures).
+# Imagen vanilla upstream; las traducciones per-provider viven en Python
+# (src/modules/providers/cliproxy/translate.py). Ver docs/PROXIMA_GATEWAY_PLAN.md §3.
+
+host: ""
+port: 8317
+
+tls:
+  enable: false
+
+remote-management:
+  # El navegador llega por túnel SSH, así que la petición entra por el gateway
+  # bridge de Docker (172.x) y el modo estricto la rechazaría.
+  allow-remote: true
+  secret-key: "GENERAR: openssl rand -hex 24"
+  disable-control-panel: false
+  panel-github-repository: "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
+
+auth-dir: "/root/.cli-proxy-api"
+
+api-keys:
+  - "GENERAR: openssl rand -hex 24"
+
+# Necesario para medir uso; retención en memoria de 60s (por eso F3 persiste
+# a Postgres).
+usage-statistics-enabled: true
+
+debug: false
+commercial-mode: false
+logging-to-file: false
+logs-max-total-size-mb: 0

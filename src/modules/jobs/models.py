@@ -15,7 +15,7 @@ from src.core.domain import JobPriority, JobStatus, JobType
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Job(SQLModel, table=True):

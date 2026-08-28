@@ -19,7 +19,7 @@ from src.core.domain import JobStatus, SSEEventType
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class SSEEvent(BaseModel):
@@ -183,4 +183,24 @@ class SSEEvents:
             job_id=job_id,
             status=JobStatus.CANCELLED,
             message=reason,
+        )
+
+    @staticmethod
+    def mission_log(
+        job_id: UUID,
+        log_message: str,
+        level: str = "info",
+        agent: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SSEEvent:
+        return SSEEvent(
+            event_type=SSEEventType.MISSION_LOG,
+            job_id=job_id,
+            status=JobStatus.RUNNING,
+            message=log_message,
+            metadata={
+                "level": level,
+                "agent": agent,
+                **(metadata or {}),
+            },
         )

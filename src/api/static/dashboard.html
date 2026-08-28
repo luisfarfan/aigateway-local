@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gateway | Mission Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #030014;
+            --surface: rgba(255, 255, 255, 0.05);
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.3);
+            --accent: #a855f7;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --success: #10b981;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* --- Background Animation --- */
+        .glass-bg {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: 
+                radial-gradient(circle at 20% 30%, var(--primary-glow) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(168, 85, 247, 0.15) 0%, transparent 40%);
+            z-index: -1;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr 400px;
+            height: 100vh;
+            gap: 1px;
+            background: var(--border);
+        }
+
+        /* --- Sidebar & Common --- */
+        .panel {
+            background: var(--bg);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        h2 { font-size: 1rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-dim); }
+
+        /* --- History Panel --- */
+        #history-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .history-item {
+            padding: 1rem;
+            border-radius: 12px;
+            background: var(--surface);
+            margin-bottom: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .history-item:hover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .history-item .type { font-size: 0.7rem; color: var(--primary); font-weight: 800; text-transform: uppercase; margin-bottom: 0.25rem; }
+        .history-item .prompt { font-size: 0.9rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .history-item .date { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.5rem; }
+
+        /* --- Main Mission Panel --- */
+        .main-view {
+            background: rgba(3, 0, 20, 0.8);
+            backdrop-filter: blur(20px);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .current-mission-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            background: var(--primary-glow);
+            border: 1px solid var(--primary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-pulse {
+            width: 8px; height: 8px; background: var(--primary); border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.5; }
+            100% { transform: scale(0.95); opacity: 1; }
+        }
+
+        /* --- Player / Preview --- */
+        #preview-container {
+            flex: 1;
+            background: #000;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        #preview-container .placeholder {
+            text-align: center;
+            color: var(--text-dim);
+        }
+
+        #preview-container video, #preview-container img {
+            width: 100%; height: 100%; object-fit: contain;
+        }
+
+        .progress-container {
+            padding: 1.5rem;
+            background: var(--surface);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 1rem; overflow: hidden; }
+        #progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* --- Logs Panel --- */
+        .logs-view {
+            background: #000;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 1.5rem;
+            overflow-y: auto;
+            font-size: 0.85rem;
+        }
+
+        .log-entry {
+            margin-bottom: 1rem;
+            border-left: 2px solid var(--border);
+            padding-left: 1rem;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .log-entry.thought { border-color: var(--accent); }
+        .log-entry.action { border-color: var(--primary); }
+        .log-entry .agent { color: var(--accent); font-weight: 600; font-size: 0.7rem; margin-bottom: 0.25rem; }
+        .log-entry .msg { line-height: 1.5; color: var(--text-dim); }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="container">
+        <!-- History -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>History</h2>
+                <button onclick="loadHistory()" style="background:none; border:none; cursor:pointer; color:var(--text-dim)">↺</button>
+            </div>
+            <div id="history-list">
+                <div class="placeholder" style="padding: 2rem; text-align:center; color:var(--text-dim)">Loading archive...</div>
+            </div>
+        </div>
+
+        <!-- Main Workspace -->
+        <main class="main-view">
+            <div class="current-mission-header">
+                <div>
+                    <h1 id="mission-title" style="font-size: 1.5rem; font-weight: 800; margin-bottom: 0.5rem;">Mission Workspace</h1>
+                    <p id="mission-desc" style="color: var(--text-dim); font-size: 0.9rem;">Start a new mission below or select from history.</p>
+                </div>
+                <div id="status-badge" class="status-badge" style="display:none">
+                    <div class="status-pulse"></div>
+                    <span id="status-text">RUNNING</span>
+                </div>
+            </div>
+
+            <!-- New Mission Input Area -->
+            <div style="background: var(--surface); padding: 1.5rem; border-radius: 20px; border: 1px solid var(--border); display: flex; gap: 1rem;">
+                <input type="text" id="mission-input" placeholder="Enter mission prompt (e.g. 'Create a video about Mars exploration')" 
+                       style="flex: 1; background: transparent; border: none; color: white; outline: none; font-size: 1rem;">
+                <button onclick="launchMission()" id="launch-btn"
+                        style="background: var(--primary); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                    Launch Mission
+                </button>
+            </div>
+
+            <div id="preview-container">
+                <div class="placeholder">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="opacity:0.2; margin-bottom: 1rem;">
+                        <path d="M15 10l5 5-5 5M4 4v7a4 4 0 004 4h12"></path>
+                    </svg>
+                    <p>Generated media will appear here</p>
+                </div>
+            </div>
+
+            <div class="progress-container">
+                <div style="display:flex; justify-content:space-between; font-size: 0.8rem;">
+                    <span id="step-name">Initializing...</span>
+                    <span id="progress-val">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Logs -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Agent Reasoning</h2>
+            </div>
+            <div id="log-feed" class="logs-view">
+                <div style="color:var(--text-dim); font-style:italic">Connect to SSE to see agent thoughts...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentJobId = null;
+        let eventSource = null;
+
+        async function launchMission() {
+            const input = document.getElementById('mission-input');
+            const btn = document.getElementById('launch-btn');
+            const prompt = input.value.trim();
+            
+            if (!prompt) return;
+
+            btn.disabled = true;
+            btn.innerText = 'Launching...';
+            btn.style.opacity = '0.5';
+
+            try {
+                const response = await fetch('/api/v1/jobs/', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-API-Key': 'your-secret-api-key-here' // Should be handled better in prod
+                    },
+                    body: JSON.stringify({
+                        type: "autonomous_mission",
+                        provider: "orchestrator",
+                        priority: "high",
+                        input: { prompt: prompt }
+                    })
+                });
+
+                if (!response.ok) throw new Error("Launch failed");
+
+                const job = await response.json();
+                input.value = '';
+                
+                // Switch focus to new job
+                document.getElementById('mission-title').innerText = "Active Mission";
+                document.getElementById('mission-desc').innerText = prompt;
+                document.getElementById('log-feed').innerHTML = '';
+                document.getElementById('status-badge').style.display = 'flex';
+                document.getElementById('status-text').innerText = 'RUNNING';
+                document.getElementById('status-badge').style.borderColor = 'var(--primary)';
+                document.getElementById('status-badge').querySelector('.status-pulse').style.background = 'var(--primary)';
+                
+                updateProgress(0, "Mission queued");
+                connectSSE(job.id);
+                loadHistory(); // Refresh sidebar
+
+            } catch (e) {
+                alert("Error launching mission: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Launch Mission';
+                btn.style.opacity = '1';
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/v1/jobs?page_size=20', {
+                    headers: { 'X-API-Key': 'your-secret-api-key-here' }
+                });
+                const data = await response.json();
+                const list = document.getElementById('history-list');
+                list.innerHTML = '';
+                
+                data.items.forEach(job => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.onclick = () => selectJob(job);
+                    
+                    const prompt = job.input_payload?.prompt || job.tags?.prompt || "Autonomous Mission";
+                    
+                    item.innerHTML = `
+                        <div class="type">${job.type}</div>
+                        <div class="prompt">${prompt}</div>
+                        <div class="date">${new Date(job.created_at).toLocaleString()}</div>
+                    `;
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                console.error("Failed to load history", e);
+            }
+        }
+
+        function selectJob(job) {
+            currentJobId = job.id;
+            document.getElementById('mission-title').innerText = job.type.replace('_', ' ');
+            document.getElementById('mission-desc').innerText = `ID: ${job.id}`;
+            document.getElementById('progress-val').innerText = `${job.progress_percent || 0}%`;
+            document.getElementById('progress-fill').style.width = `${job.progress_percent || 0}%`;
+            
+            if (job.artifacts && job.artifacts.length > 0) {
+                renderArtifact(job.artifacts[0]);
+            } else {
+                showPlaceholder("No artifacts found for this job");
+            }
+
+            connectSSE(job.id);
+        }
+
+        function renderArtifact(artifact) {
+            const container = document.getElementById('preview-container');
+            container.innerHTML = '';
+            
+            if (artifact.artifact_type === 'video') {
+                const video = document.createElement('video');
+                video.src = artifact.public_url;
+                video.controls = true;
+                video.autoplay = true;
+                container.appendChild(video);
+            } else if (artifact.artifact_type === 'image') {
+                const img = document.createElement('img');
+                img.src = artifact.public_url;
+                container.appendChild(img);
+            }
+        }
+
+        function showPlaceholder(msg) {
+            const container = document.getElementById('preview-container');
+            container.innerHTML = `<div class="placeholder"><p>${msg}</p></div>`;
+        }
+
+        function connectSSE(jobId = null) {
+            if (eventSource) eventSource.close();
+            
+            // Replaced /api/v1/events/ with /api/v1/events and added api_key query param for auth
+            const url = `/api/v1/events?api_key=your-secret-api-key-here`;
+            eventSource = new EventSource(url);
+            
+            const logFeed = document.getElementById('log-feed');
+            if (!jobId) logFeed.innerHTML = '';
+
+            eventSource.addEventListener('progress', (e) => {
+                const data = JSON.parse(e.data);
+                if (jobId && data.job_id !== jobId) return;
+                
+                updateProgress(data.progress_percent, data.message || data.metadata?.step);
+            });
+
+            eventSource.addEventListener('mission_log', (e) => {
+                const data = JSON.parse(e.data);
+                if (jobId && data.job_id !== jobId) return;
+
+                addLog(data.metadata?.agent || "Agent", data.message);
+            });
+
+            eventSource.addEventListener('artifact_ready', (e) => {
+                const data = JSON.parse(e.data);
+                if (jobId && data.job_id !== jobId) return;
+
+                addLog("System", `Artifact ready: ${data.metadata?.filename}`);
+                renderArtifact({
+                    artifact_type: data.metadata?.artifact_type,
+                    public_url: data.artifact_url
+                });
+            });
+
+            eventSource.onmessage = (e) => {
+                console.log("Generic SSE:", e.data);
+            };
+        }
+
+        function addLog(agent, msg) {
+            const feed = document.getElementById('log-feed');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry thought';
+            entry.innerHTML = `
+                <div class="agent">${agent}</div>
+                <div class="msg">${msg}</div>
+            `;
+            feed.insertBefore(entry, feed.firstChild);
+        }
+
+        function updateProgress(val, step) {
+            document.getElementById('status-badge').style.display = 'flex';
+            document.getElementById('progress-val').innerText = `${Math.round(val)}%`;
+            document.getElementById('progress-fill').style.width = `${val}%`;
+            if (step) document.getElementById('step-name').innerText = step;
+            
+            if (val >= 100) {
+                document.getElementById('status-text').innerText = 'COMPLETED';
+                document.getElementById('status-badge').style.borderColor = 'var(--success)';
+                document.getElementById('status-badge').querySelector('.status-pulse').style.background = 'var(--success)';
+            }
+        }
+
+        // Initial Load
+        loadHistory();
+        connectSSE(); // Listen to everything initially
+    </script>
+</body>
+</html>

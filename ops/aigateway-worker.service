@@ -1,0 +1,21 @@
+# Worker de jobs — ejecuta la cola ARQ del plano asíncrono.
+#
+# Sin esto, los jobs se encolan y nadie los ejecuta: se quedan en `queued` para
+# siempre. El plano síncrono /v1/* funciona sin el worker; el de /api/v1/jobs no.
+
+[Unit]
+Description=Proxima AI Gateway (worker de jobs)
+Documentation=https://github.com/luisfarfan/aigateway-local
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=/bin/bash -c 'set -a; . ./.env; set +a; exec .venv/bin/python -m workers.main'
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target

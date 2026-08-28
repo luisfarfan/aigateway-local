@@ -9,6 +9,17 @@ For now, fixtures provide an async test client with:
   - In-memory SQLite for DB (fast, no Docker needed for unit tests)
   - FakeRedis for pub/sub
 """
+import os
+
+# El `.env` del repo trae API_KEYS con claves de ejemplo, lo que apaga el modo
+# abierto y hace que cada test tenga que autenticarse. Que la suite pase o no
+# dependa del .env de cada máquina es una fuente de falsos rojos, así que se
+# fuerza vacío ANTES de importar nada que lea Settings (get_settings cachea).
+os.environ["API_KEYS"] = ""
+# Sin esto, cada test que pasa por el plano síncrono intenta escribir el
+# histórico en un Postgres que no existe y espera el timeout de conexión.
+os.environ["LLM_HISTORY_ENABLED"] = "false"
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

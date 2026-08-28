@@ -8,6 +8,8 @@ Creates and configures the app instance:
   - Prometheus metrics
 """
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.lifespan import lifespan
@@ -50,6 +52,20 @@ def create_app() -> FastAPI:
     app.include_router(artifacts_router, prefix=settings.api_prefix)
     app.include_router(uploads_router, prefix=settings.api_prefix)
     app.include_router(status_router, prefix=settings.api_prefix)
+
+    # Plano síncrono OpenAI-compatible. Va en la raíz, no bajo api_prefix:
+    # migrar un consumidor tiene que ser cambiar la base_url y nada más.
+    if settings.enable_provider_cliproxy:
+        from src.api.openai_compat.router import router as openai_compat_router
+
+        app.include_router(openai_compat_router)
+
+    # ── Static Metrics/Files ──────────────────────────────────────────────────
+    app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
+
+    @app.get("/dashboard", tags=["UI"], include_in_schema=False)
+    async def dashboard_redirect():
+        return RedirectResponse(url="/static/dashboard.html")
 
     # ── Health / readiness ────────────────────────────────────────────────────
     _register_health_routes(app)

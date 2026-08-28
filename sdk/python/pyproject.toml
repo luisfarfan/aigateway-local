@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "proxima-llm"
+version = "0.1.0"
+description = "Cliente de Proxima Gateway — una sola puerta a modelos cloud y locales"
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.27.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["proxima_llm"]

@@ -39,7 +39,7 @@ class JobRepository:
         result = await self._s.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list(self, filters: JobListFilters, client_id: str | None = None) -> tuple[list[Job], int]:
+    async def find_all(self, filters: JobListFilters, client_id: str | None = None) -> tuple[list[Job], int]:
         stmt = select(Job)
         count_stmt = select(func.count()).select_from(Job)
 
@@ -118,7 +118,7 @@ class JobRepository:
                 f"Invalid transition: {job.status} → {new_status} for job {job.id}"
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         job.status = new_status
 
         if new_status == JobStatus.QUEUED:

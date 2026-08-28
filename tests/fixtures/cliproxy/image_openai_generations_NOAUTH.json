@@ -1,0 +1,27 @@
+{
+  "case": "image_openai_generations_NOAUTH",
+  "why": "NEGATIVO: forma exacta del error cuando ninguna credencial cubre el modelo. El routing (F4) tiene que distinguirlo de un fallo de red.",
+  "expect": "error",
+  "recorded_at": "2026-08-27T05:25:24+00:00",
+  "request": {
+    "method": "POST",
+    "path": "/v1/images/generations",
+    "body": {
+      "model": "gpt-image-2",
+      "prompt": "un cubo rojo simple sobre fondo blanco",
+      "response_format": "b64_json",
+      "size": "1024x1024",
+      "quality": "low"
+    }
+  },
+  "response": {
+    "status": 503,
+    "body": {
+      "error": {
+        "message": "auth_not_found: no auth available (providers=codex, model=gpt-image-2)",
+        "type": "server_error",
+        "code": "internal_server_error"
+      }
+    }
+  }
+}

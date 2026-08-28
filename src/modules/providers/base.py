@@ -63,12 +63,11 @@ class ExecutionContext:
     priority: str
     timeout_seconds: int | None
     worker_id: str
-
     # Callbacks — providers MUST call these during execution.
-    # on_progress: report current progress (0.0–100.0) and optional step name
-    # on_artifact: register a generated output file
     on_progress: ProgressCallback
     on_artifact: ArtifactCallback
+
+    registry: Any = None  # Avoid circular import: ProviderRegistry
 
 
 # ─── Provider result ───────────────────────────────────────────────────────────

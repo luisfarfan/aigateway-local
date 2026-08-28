@@ -33,9 +33,12 @@ from src.modules.providers.base import (
 
 log = structlog.get_logger(__name__)
 
-TTS_ENGINE = os.environ.get("LOCAL_TTS_ENGINE", "xtts")
+from src.core.config import get_settings
+_settings = get_settings()
+
+TTS_ENGINE = _settings.local_tts_engine
 XTTS_MODEL_PATH = os.environ.get("XTTS_MODEL_PATH", "tts_models/multilingual/multi-dataset/xtts_v2")
-PIPER_MODELS_DIR = os.environ.get("PIPER_MODELS_DIR", "/data/models/piper")
+PIPER_MODELS_DIR = "/home/lucho/projects/aigateway-local/data/models/piper"
 
 # Available voices per engine — extend as you add voice files
 XTTS_VOICES: dict[str, str] = {
@@ -45,8 +48,8 @@ XTTS_VOICES: dict[str, str] = {
 }
 
 PIPER_VOICES: dict[str, str] = {
-    # voice_id → path to piper model .onnx file
-    # "en_US_amy": "/data/models/piper/en_US-amy-medium.onnx",
+    "default": "/home/lucho/projects/aigateway-local/data/models/piper/es_ES-sharvard-medium.onnx",
+    "es_ES": "/home/lucho/projects/aigateway-local/data/models/piper/es_ES-sharvard-medium.onnx",
 }
 
 
@@ -251,6 +254,9 @@ class LocalTTSProvider(BaseProvider):
             buf = io.BytesIO()
             import wave
             with wave.open(buf, "wb") as wav_file:
+                wav_file.setnchannels(1)  # Piper is mono
+                wav_file.setsampwidth(2)   # 16-bit
+                wav_file.setframerate(piper_voice.config.sample_rate)
                 piper_voice.synthesize(text, wav_file)
             buf.seek(0)
             return buf.read()
