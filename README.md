@@ -701,6 +701,13 @@ La respuesta trae las fuentes ya extraídas:
 en prosa sin emitir la referencia estructurada. Deducir una de la otra da falsos
 negativos.
 
+**En la práctica:** cuando la sirve Gemini vienen 3-4 fuentes con `uri` y `title`.
+Si Gemini está saturado y la cadena cae a Codex, `searched` sigue en `true` pero
+`sources` puede volver **vacío** — Codex a menudo cita dentro del texto sin emitir la
+anotación. Si tu caso depende de tener fuentes estructuradas, fuerza
+`model: "gemini-3-flash"` en vez de dejar que decida la cadena, y maneja el error si
+está caído.
+
 ### Visión
 
 Contenido multimodal en la forma de OpenAI. El gateway lo pasa tal cual, así que
@@ -1151,6 +1158,14 @@ MINIO_ENDPOINT=http://localhost:9010
 ```bash
 pip install "proxima-llm @ git+ssh://git@github.com/luisfarfan/aigateway-local.git#subdirectory=sdk/python"
 ```
+
+> Mientras el gateway viva en la rama `feat/gateway-cloud-local` y no en `main`, hay
+> que apuntar a ella — si no, pip busca el paquete en `main`, no lo encuentra y falla
+> con `does not appear to be a Python project`:
+>
+> ```bash
+> pip install "proxima-llm @ git+ssh://git@github.com/luisfarfan/aigateway-local.git@feat/gateway-cloud-local#subdirectory=sdk/python"
+> ```
 
 Dos superficies, porque los proyectos que lo consumen usan una cada uno:
 
