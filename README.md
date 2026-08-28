@@ -580,6 +580,7 @@ de esta máquina.
 - [SDK de Python](#sdk-de-python)
 - [Observabilidad](#observabilidad)
 - [Comparar modelos](#comparar-modelos-evals)
+- [Servicio nativo](#servicio-nativo-que-funcione-siempre)
 - [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
 - [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
 
@@ -592,6 +593,9 @@ docker compose up -d          # cliproxy, postgres, redis, minio, clickhouse, la
 make serve                    # el gateway en 0.0.0.0:8000
 make worker                   # el worker de jobs (sólo si vas a usar el plano async)
 ```
+
+Eso sirve para trabajar. Para que quede sirviendo **siempre**, incluso tras reiniciar
+la máquina, ver [Servicio nativo](#servicio-nativo-que-funcione-siempre).
 
 Antes del primer uso hay que conectar las cuentas cloud una vez —
 ver [CLIPROXY-AUTH.md](docs/CLIPROXY-AUTH.md).
@@ -1289,6 +1293,78 @@ reproduce un modo de fallo observado. Añadir uno es editar ese YAML.
 
 Ya sirvieron: en su primera corrida encontraron un HTTP 400 de OpenAI que ningún test
 unitario veía, porque el schema estricto no llevaba `type` en los nodos `const`.
+
+---
+
+## Servicio nativo (que funcione siempre)
+
+Los contenedores llevan `restart: unless-stopped`, así que vuelven solos al reiniciar
+la máquina. El gateway y el worker no, porque no están containerizados: si los lanzas
+a mano en un terminal, mueren al cerrarlo. Resultado: reinicias y todo vuelve **menos
+la puerta de entrada**.
+
+Se arregla con dos servicios de usuario de systemd — con tu cuenta, tu venv y tu
+`.env`, sin root:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ops/aigateway.service ops/aigateway-worker.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aigateway aigateway-worker
+
+# Sin esto systemd los mata al cerrar sesión, y no arrancan hasta que entres.
+sudo loginctl enable-linger $USER
+```
+
+Comprobar y operar:
+
+```bash
+systemctl --user status aigateway
+journalctl --user -u aigateway -f          # logs en vivo
+systemctl --user restart aigateway         # tras tocar .env o config/*.yaml
+systemctl --user disable --now aigateway aigateway-worker
+```
+
+`Restart=always` los levanta si se caen. Verificado con un `kill -9`: vuelve solo en
+~10 s. `StartLimitIntervalSec=0` evita que systemd se rinda si Postgres tarda en
+arrancar tras un reinicio.
+
+**El worker es opcional pero conviene:** sin él, los jobs de `/api/v1/jobs` se encolan
+y nadie los ejecuta — se quedan en `queued` para siempre. El plano `/v1/*` funciona
+sin worker.
+
+### Dos trampas del `.env` que sólo aparecen bajo systemd
+
+**1. systemd no quita los comentarios de la misma línea.** Bash sí. Con un `.env`
+que trae:
+
+```bash
+LOG_JSON=false                   # true in production
+```
+
+`EnvironmentFile=` le pasaría a la app el string `false                   # true in
+production` y pydantic falla al arrancar. Por eso los units **no** usan
+`EnvironmentFile`: hacen que bash lea el archivo.
+
+```ini
+ExecStart=/bin/bash -c 'set -a; . ./.env; set +a; exec .venv/bin/uvicorn ...'
+```
+
+**2. Todo lo que el servicio necesita tiene que estar EN el `.env`.** Lanzándolo a
+mano es fácil escribir `POSTGRES_PORT=5442 make serve` y no notar que la variable
+falta del archivo. El servicio no tiene esa línea de comandos.
+
+Pasó tres veces al instalarlo, y cada una se veía distinta:
+
+| Falta | Síntoma |
+|---|---|
+| `POSTGRES_PORT` apuntaba a 5432 | `password authentication failed for user "gateway"` — se conectaba al PostgreSQL del sistema, no al nuestro |
+| `MINIO_ENDPOINT` apuntaba a otro MinIO | arranca, pero los artefactos irían al servidor equivocado |
+| `CLIPROXY_API_KEY` no estaba | `Illegal header value b'Bearer '` |
+
+Ninguna se veía en las pruebas manuales, porque en todas yo pasaba el valor correcto
+por línea de comandos. Si cambias algo del entorno, **pruébalo reiniciando el
+servicio**, no lanzándolo a mano.
 
 ---
 

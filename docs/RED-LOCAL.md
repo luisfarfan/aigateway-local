@@ -26,14 +26,16 @@ en local, y es exactamente lo que no debe usarse escuchando en la red.
 make serve      # uvicorn en 0.0.0.0:8000, sin --reload
 ```
 
-Para que quede corriendo siempre, incluso tras reiniciar:
+Para que quede corriendo siempre, incluso tras reiniciar, hay dos servicios de
+usuario de systemd (API y worker). Instalación y trampas del `.env` en el README,
+sección **Servicio nativo**:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ops/aigateway.service ~/.config/systemd/user/
+cp ops/aigateway.service ops/aigateway-worker.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now aigateway
-sudo loginctl enable-linger $USER   # sin esto, systemd lo mata al cerrar sesión
+systemctl --user enable --now aigateway aigateway-worker
+sudo loginctl enable-linger $USER   # sin esto, systemd los mata al cerrar sesión
 ```
 
 Los contenedores (cliproxy, postgres, redis, minio, langfuse) los levanta

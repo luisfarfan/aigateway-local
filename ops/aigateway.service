@@ -1,36 +1,32 @@
-# Servicio de usuario para dejar el gateway sirviendo a la red del WiFi.
+# Gateway de modelos — API en 0.0.0.0:8000.
 #
-# Instalar:
-#   mkdir -p ~/.config/systemd/user
-#   cp ops/aigateway.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now aigateway
+# Servicio de usuario, no de sistema: corre con tu cuenta, tu venv y tu .env,
+# sin necesidad de root. Instalación en el README (sección "Servicio nativo").
 #
-# Para que siga corriendo con la sesión cerrada (si no, systemd lo mata al salir):
-#   sudo loginctl enable-linger $USER
-#
-# Ver logs:      journalctl --user -u aigateway -f
-# Reiniciar:     systemctl --user restart aigateway
-# Apagar:        systemctl --user disable --now aigateway
+# Por qué ExecStart pasa por bash en vez de usar EnvironmentFile:
+# systemd NO quita los comentarios que van en la misma línea que un valor. Con
+# un .env que trae `LOG_JSON=false  # true in production`, systemd le pasaría a
+# la app el string entero y pydantic fallaría al arrancar. Bash sí los ignora,
+# así que se deja que bash lea el archivo.
 
 [Unit]
-Description=Proxima AI Gateway
-# Los contenedores (cliproxy, postgres, redis, minio, langfuse) los levanta
-# docker compose aparte; esto sólo espera a que la red esté lista.
-After=network-online.target
+Description=Proxima AI Gateway (API)
+Documentation=https://github.com/luisfarfan/aigateway-local
+# Los contenedores los levanta docker con restart: unless-stopped. Esto sólo
+# espera a que docker esté listo; si Postgres aún no acepta conexiones, el
+# arranque falla y systemd reintenta (Restart=always).
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=exec
 WorkingDirectory=%h/projects/aigateway-local
-EnvironmentFile=%h/projects/aigateway-local/.env
-# Postgres y MinIO salieron por puertos no estándar porque los de siempre están
-# ocupados en esta máquina. Ver docs/F3-OBSERVABILITY.md.
-Environment=POSTGRES_PORT=5442
-Environment=MINIO_ENDPOINT=http://localhost:9010
-ExecStart=%h/projects/aigateway-local/.venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000
-Restart=on-failure
-RestartSec=5
+ExecStart=/bin/bash -c 'set -a; . ./.env; set +a; exec .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000'
+Restart=always
+RestartSec=10
+# Si Postgres tarda en arrancar tras un reinicio, systemd reintentaría en bucle
+# y se rendiría. Con esto reintenta indefinidamente.
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target
