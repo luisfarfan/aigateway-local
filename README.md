@@ -580,6 +580,7 @@ de esta máquina.
   - [Watchdog](#watchdog) · [Precios](#precios) · [Variables](#variables-de-entorno)
 - [SDK de Python](#sdk-de-python)
 - [Observabilidad](#observabilidad)
+- [Routing por intención (tiers)](#routing-por-intención-tiers) · [Mapa de capacidades (prober)](#mapa-de-capacidades-prober)
 - [Comparar modelos](#comparar-modelos-evals)
 - [Clientes agénticos](#clientes-agénticos) · [Servicio nativo](#servicio-nativo-que-funcione-siempre)
 - [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
@@ -1394,9 +1395,31 @@ Lo que el prober **no** mide: la **calidad**. "El más listo" o "mejor programad
 juicios que salen de los [evals](#comparar-modelos-evals), no de una sonda. El prober
 da el roster y las capacidades; el ranking de calidad es otra capa.
 
-Pensado para correr **programado**: el mapa se regenera, no se mantiene a mano. Un
-modelo nuevo entra solo a las capacidades medibles; su lugar en un tier de calidad
-espera un eval.
+### Se regenera solo (no se mantiene a mano)
+
+Un timer de systemd corre el prober **cada 6 h** — el roster no cambia por minuto, y
+4 barridos al día detectan un modelo nuevo el mismo día sin gastar cuota de gusto.
+
+```bash
+cp ops/aigateway-prober.service ops/aigateway-prober.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aigateway-prober.timer
+systemctl --user list-timers aigateway-prober.timer    # ver el próximo barrido
+```
+
+El barrido programado usa `--websearch` pero **no** `--images` (imagen tarda 30-150 s
+por modelo). Para no perder la capacidad de imagen que fijó un barrido completo, el
+prober **fusiona**: lo que un barrido no sondea, lo hereda del mapa anterior; lo que sí
+sondea, manda. Así un barrido barato nunca degrada lo que otro midió.
+
+**El gateway recoge el mapa nuevo sin reiniciar.** El resolvedor de tiers relee el
+archivo cuando cambia su `mtime`, así que un re-barrido surte efecto en la siguiente
+petición. Corre `--images` a mano cada tanto (o cuando aparezca un modelo de imagen
+nuevo) para refrescar esa capacidad:
+
+```bash
+python scripts/probe_models.py --websearch --images   # barrido completo, manual
+```
 
 ## Comparar modelos (evals)
 
@@ -1465,18 +1488,25 @@ la máquina. El gateway y el worker no, porque no están containerizados: si los
 a mano en un terminal, mueren al cerrarlo. Resultado: reinicias y todo vuelve **menos
 la puerta de entrada**.
 
-Se arregla con dos servicios de usuario de systemd — con tu cuenta, tu venv y tu
-`.env`, sin root:
+Se arregla con servicios de usuario de systemd — con tu cuenta, tu venv y tu `.env`,
+sin root. Son tres: la API, el worker de jobs, y el timer del prober:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ops/aigateway.service ops/aigateway-worker.service ~/.config/systemd/user/
+cp ops/aigateway.service ops/aigateway-worker.service \
+   ops/aigateway-prober.service ops/aigateway-prober.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now aigateway aigateway-worker
+systemctl --user enable --now aigateway aigateway-worker aigateway-prober.timer
 
 # Sin esto systemd los mata al cerrar sesión, y no arrancan hasta que entres.
 sudo loginctl enable-linger $USER
 ```
+
+| Unidad | Qué hace |
+|---|---|
+| `aigateway` | la API en `0.0.0.0:8000` |
+| `aigateway-worker` | ejecuta la cola de jobs (`/api/v1/jobs`) |
+| `aigateway-prober.timer` | regenera el [mapa de capacidades](#mapa-de-capacidades-prober) cada 6 h |
 
 Comprobar y operar:
 
@@ -1695,6 +1725,8 @@ Probado end-to-end contra el gateway expuesto en la red, con modelos reales:
 | function calling multi-turno (`tool_calls` → `role: tool` → respuesta) | ✅ |
 | imagen por `/v1/*` y por jobs (con artefacto en MinIO) | ✅ |
 | embeddings (`bge-m3`, 1024 dims) | ✅ |
+| routing por intención (`smart`/`cheap`/`fast`), con fallback que preserva capacidad | ✅ |
+| prober de capacidades (36 modelos mapeados) + timer cada 6 h + recarga en caliente | ✅ |
 | modelos locales de Ollama, y fallback cloud → local | ✅ |
 | autenticación (401 sin clave, 200 con clave, desde la LAN) | ✅ |
 | cache, fallback declarado en la respuesta, watchdog | ✅ |
