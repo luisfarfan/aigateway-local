@@ -4,6 +4,7 @@ Artifact service — retrieves artifacts and refreshes presigned URLs.
 Presigned URLs have a TTL (default 24h). This service always generates a
 fresh URL on demand so clients never get a stale link.
 """
+
 from uuid import UUID
 
 import structlog
@@ -33,6 +34,7 @@ class ArtifactService:
 
         # Ownership check — artifact belongs to a job that belongs to the client
         from src.modules.jobs.models import Job
+
         job = await self._session.get(Job, artifact.job_id)
         if not job or job.client_id != client_id:
             raise ArtifactNotFoundError(str(artifact_id))
@@ -58,11 +60,10 @@ class ArtifactService:
             created_at=artifact.created_at,
         )
 
-    async def list_job_artifacts(
-        self, job_id: UUID, client_id: str
-    ) -> list[ArtifactResponse]:
+    async def list_job_artifacts(self, job_id: UUID, client_id: str) -> list[ArtifactResponse]:
         """Returns all artifacts for a job, with fresh presigned URLs."""
         from src.modules.jobs.models import Job
+
         job = await self._session.get(Job, job_id)
         if not job or job.client_id != client_id:
             return []
@@ -78,14 +79,16 @@ class ArtifactService:
                 artifact.public_url = url
             except StorageError:
                 pass
-            responses.append(ArtifactResponse(
-                id=artifact.id,
-                job_id=artifact.job_id,
-                artifact_type=artifact.artifact_type,
-                filename=artifact.filename,
-                public_url=artifact.public_url,
-                mime_type=artifact.mime_type,
-                size_bytes=artifact.size_bytes,
-                created_at=artifact.created_at,
-            ))
+            responses.append(
+                ArtifactResponse(
+                    id=artifact.id,
+                    job_id=artifact.job_id,
+                    artifact_type=artifact.artifact_type,
+                    filename=artifact.filename,
+                    public_url=artifact.public_url,
+                    mime_type=artifact.mime_type,
+                    size_bytes=artifact.size_bytes,
+                    created_at=artifact.created_at,
+                )
+            )
         return responses

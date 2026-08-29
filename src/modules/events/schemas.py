@@ -9,6 +9,7 @@ Wire format over the HTTP connection:
 The `id` field is used by the browser's EventSource to send `Last-Event-ID` on reconnect,
 enabling the API to replay missed events from the job_events table.
 """
+
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -29,6 +30,7 @@ class SSEEvent(BaseModel):
     Workers create these via SSEEvents factory methods and publish them to Redis.
     The SSE endpoint subscribes, serializes to SSE wire format, and streams to the client.
     """
+
     event_type: SSEEventType
     job_id: UUID
     timestamp: datetime = Field(default_factory=_utcnow)

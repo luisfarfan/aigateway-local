@@ -6,6 +6,7 @@ Endpoints:
   GET /artifacts/{id}/download  — 302 redirect to presigned URL (browser-friendly)
   GET /jobs/{id}/artifacts      — all artifacts for a job
 """
+
 from uuid import UUID
 
 import structlog

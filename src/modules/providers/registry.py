@@ -4,6 +4,7 @@ Provider registry — central catalog of all registered AI engine adapters.
 Providers self-register at worker startup via registry.register().
 Workers and dispatchers use registry.resolve() to get the correct adapter for a job.
 """
+
 from src.core.domain import JobType
 from src.modules.providers.base import BaseProvider, ProviderCapability
 
@@ -32,8 +33,7 @@ class ProviderRegistry:
         pid = provider.provider_id
         if pid in self._providers:
             raise ValueError(
-                f"Provider '{pid}' is already registered. "
-                "Each provider_id must be unique."
+                f"Provider '{pid}' is already registered. Each provider_id must be unique."
             )
         self._providers[pid] = provider
 
@@ -50,9 +50,7 @@ class ProviderRegistry:
         provider = self._providers.get(provider_id)
         if provider is None:
             available = list(self._providers.keys())
-            raise ValueError(
-                f"Provider '{provider_id}' not registered. Available: {available}"
-            )
+            raise ValueError(f"Provider '{provider_id}' not registered. Available: {available}")
         if not provider.supports(job_type, model):
             raise ValueError(
                 f"Provider '{provider_id}' does not support "

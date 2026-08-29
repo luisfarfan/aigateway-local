@@ -18,6 +18,7 @@ Two upload methods:
    Client uploads directly to MinIO (no traffic through the gateway).
    Best for large files (images, long audio, video).
 """
+
 from uuid import uuid4
 
 import structlog
@@ -41,13 +42,26 @@ _MAX_DIRECT_UPLOAD_BYTES = 500 * 1024 * 1024
 # Allowed MIME types for source files
 _ALLOWED_MIME_TYPES = {
     # Images
-    "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
     # Audio
-    "audio/wav", "audio/wave", "audio/x-wav",
-    "audio/mpeg", "audio/mp3",
-    "audio/ogg", "audio/flac", "audio/aac", "audio/m4a",
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/ogg",
+    "audio/flac",
+    "audio/aac",
+    "audio/m4a",
     # Video (for future STT on video files)
-    "video/mp4", "video/mpeg", "video/webm",
+    "video/mp4",
+    "video/mpeg",
+    "video/webm",
     # Generic — allow if client knows what they're doing
     "application/octet-stream",
 }
@@ -93,8 +107,7 @@ async def upload_file(
     if mime_type not in _ALLOWED_MIME_TYPES:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported file type: '{mime_type}'. "
-                   f"Allowed: images, audio, video.",
+            detail=f"Unsupported file type: '{mime_type}'. Allowed: images, audio, video.",
         )
 
     data = await file.read()
@@ -103,7 +116,7 @@ async def upload_file(
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File too large for direct upload ({len(data) / 1e6:.1f} MB). "
-                   f"Use POST /uploads/presigned for files > 500 MB.",
+            f"Use POST /uploads/presigned for files > 500 MB.",
         )
 
     if len(data) == 0:

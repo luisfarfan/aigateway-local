@@ -8,6 +8,7 @@ Reconnection support:
   If the client sends Last-Event-ID (browser EventSource does this automatically),
   we replay missed events from the job_events table before subscribing to Redis.
 """
+
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from src.modules.jobs.repository import JobRepository
 log = structlog.get_logger(__name__)
 router = APIRouter(tags=["Events"])
 
+
 @router.get(
     "/events",
     summary="Global SSE stream for all system activity",
@@ -40,19 +42,20 @@ async def global_event_stream(
     client_id: str = Depends(get_current_client_id),
 ) -> EventSourceResponse:
     """
-    Experimental: Global SSE stream. 
+    Experimental: Global SSE stream.
     In this version, it just redirects or we handle it via a global channel.
     """
     redis = get_redis()
-    
+
     async def _global_generator():
         # For now, let's just subscribe to a 'global' pattern or specific channel
         pubsub = redis.pubsub()
-        await pubsub.psubscribe("job:*") # Listen to ALL job channels
-        
+        await pubsub.psubscribe("job:*")  # Listen to ALL job channels
+
         try:
             while True:
-                if await request.is_disconnected(): break
+                if await request.is_disconnected():
+                    break
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message["type"] == "pmessage":
                     event = SSEEvent.model_validate_json(message["data"])
@@ -62,6 +65,7 @@ async def global_event_stream(
             await pubsub.aclose()
 
     return EventSourceResponse(_global_generator())
+
 
 # Polling interval when no Redis message arrives (seconds)
 _POLL_INTERVAL = 0.5
@@ -195,7 +199,9 @@ async def _event_generator(
                     yield ServerSentEvent(**event.to_sse_message())
 
                     if event.is_terminal():
-                        log.info("sse_stream_terminal", job_id=str(job_id), event_type=event.event_type)
+                        log.info(
+                            "sse_stream_terminal", job_id=str(job_id), event_type=event.event_type
+                        )
                         break
 
                     last_heartbeat = now

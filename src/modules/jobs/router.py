@@ -4,6 +4,7 @@ Jobs HTTP router — CRUD endpoints for job management.
 All routes require authentication (get_current_client_id).
 The router composes dependencies and delegates to JobService.
 """
+
 from uuid import UUID
 
 import structlog
@@ -43,6 +44,7 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 # ─── Dependencies ─────────────────────────────────────────────────────────────
 
+
 def _get_registry(request: Request) -> ProviderRegistry:
     return request.app.state.provider_registry
 
@@ -63,6 +65,7 @@ def _build_service(
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
 
 @router.post(
     "",

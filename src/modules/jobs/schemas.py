@@ -5,6 +5,7 @@ These Pydantic models define what the HTTP API accepts and returns.
 They are separate from SQLModel table models — they represent the external interface,
 not the DB schema.
 """
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -17,6 +18,7 @@ from src.core.domain import JobPriority, JobStatus, JobType
 # ─── Input payload schemas per job type ───────────────────────────────────────
 # These validate the `input` field of CreateJobRequest depending on job type.
 # The API layer validates the full payload; workers receive it as raw dict.
+
 
 class TextGenerationInput(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=32_000)
@@ -95,7 +97,7 @@ class VideoAssemblyInput(BaseModel):
 
 class AutonomousMissionInput(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1000)
-    complexity: str = Field(default="standard") # standard | deep
+    complexity: str = Field(default="standard")  # standard | deep
 
 
 class PipelineStepSpec(BaseModel):
@@ -115,12 +117,14 @@ class MultimodalPipelineInput(BaseModel):
 
 # ─── Request / Response ────────────────────────────────────────────────────────
 
+
 class CreateJobRequest(BaseModel):
     """
     The request body for POST /jobs.
     The `input` field is a raw dict here — validated per-type by the job service
     using the specific Input schemas above.
     """
+
     type: JobType
     priority: JobPriority = JobPriority.NORMAL
     provider: str = Field(..., min_length=1, description="Provider ID, e.g. 'diffusers'")
@@ -193,6 +197,7 @@ class CancelJobResponse(BaseModel):
 
 class JobListFilters(BaseModel):
     """Query parameters for GET /jobs."""
+
     status: JobStatus | None = None
     type: JobType | None = None
     priority: JobPriority | None = None

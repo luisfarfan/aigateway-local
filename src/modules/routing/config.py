@@ -40,6 +40,12 @@ class RoutingTable:
     fallback_on: frozenset[str] = frozenset(_FALLBACK_ON)
     breaker: BreakerPolicy = field(default_factory=BreakerPolicy)
     watchdog_skip_routes: frozenset[str] = frozenset()
+    # Cuando el cliente pide `X-Proxima-No-Fallback`: la cadena se recorta a un
+    # solo candidato. Así, si ese modelo tiene el circuito abierto o falla, la
+    # petición falla — en vez de degradar a un modelo más débil. Es la única
+    # forma de que la cabecera cubra también el salto por circuito abierto, que
+    # es una rama distinta de `fallback_on`.
+    single_candidate: bool = False
 
     def probeable_models(self) -> list[str]:
         """Modelos que el watchdog puede sondear con una llamada de chat.
@@ -72,7 +78,7 @@ class RoutingTable:
             if model not in seen:
                 seen.add(model)
                 ordered.append(model)
-        return ordered
+        return ordered[:1] if self.single_candidate else ordered
 
     def should_fallback(self, error_kind: str) -> bool:
         return error_kind in self.fallback_on

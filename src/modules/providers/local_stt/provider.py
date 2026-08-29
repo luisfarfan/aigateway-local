@@ -17,6 +17,7 @@ Model path config:
 IMPORTANT — safe to import without faster-whisper installed.
 All engine imports are inside methods.
 """
+
 import io
 import json
 import os
@@ -43,11 +44,17 @@ STT_COMPUTE_TYPE = os.environ.get("STT_COMPUTE_TYPE", "float16")
 STT_MODEL_PATH = os.environ.get("STT_MODEL_PATH", None)  # None = download from HF Hub
 
 SUPPORTED_MODELS = [
-    "tiny", "tiny.en",
-    "base", "base.en",
-    "small", "small.en",
-    "medium", "medium.en",
-    "large-v2", "large-v3", "large-v3-turbo",
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v2",
+    "large-v3",
+    "large-v3-turbo",
 ]
 
 
@@ -59,7 +66,7 @@ class LocalSTTProvider(BaseProvider):
 
     def __init__(self) -> None:
         self._model: Any = None
-        self._engine: str | None = None   # "faster_whisper" | "openai_whisper"
+        self._engine: str | None = None  # "faster_whisper" | "openai_whisper"
         self._loaded_model_size: str | None = None
 
     @property
@@ -74,8 +81,8 @@ class LocalSTTProvider(BaseProvider):
             supported_models=SUPPORTED_MODELS,
             modality=Modality.AUDIO,
             max_concurrent_jobs=2,
-            requires_gpu=False,         # runs on CPU (slower) or GPU (fast)
-            estimated_vram_mb=2048,     # varies: tiny=~390MB, large-v3=~3GB
+            requires_gpu=False,  # runs on CPU (slower) or GPU (fast)
+            estimated_vram_mb=2048,  # varies: tiny=~390MB, large-v3=~3GB
         )
 
     def supports(self, job_type: JobType, model: str | None = None) -> bool:
@@ -89,11 +96,13 @@ class LocalSTTProvider(BaseProvider):
         """Detect available engine. Model loading is deferred to first request."""
         try:
             import faster_whisper  # noqa: F401
+
             self._engine = "faster_whisper"
             log.info("stt_engine_detected", engine="faster_whisper")
         except ImportError:
             try:
                 import whisper  # noqa: F401
+
                 self._engine = "openai_whisper"
                 log.info("stt_engine_detected", engine="openai_whisper")
             except ImportError:
@@ -107,8 +116,7 @@ class LocalSTTProvider(BaseProvider):
             return ProviderResult(
                 success=False,
                 error_message=(
-                    "No STT engine installed. "
-                    "Run: pip install faster-whisper  (recommended)"
+                    "No STT engine installed. Run: pip install faster-whisper  (recommended)"
                 ),
             )
 
@@ -121,8 +129,8 @@ class LocalSTTProvider(BaseProvider):
             )
 
         model_size = context.model or STT_MODEL_SIZE
-        language = payload.get("language")          # None = auto-detect
-        task = payload.get("task", "transcribe")    # transcribe | translate
+        language = payload.get("language")  # None = auto-detect
+        task = payload.get("task", "transcribe")  # transcribe | translate
         word_timestamps = bool(payload.get("word_timestamps", False))
 
         await context.on_progress(0.0, "Downloading audio from storage")
@@ -222,6 +230,7 @@ class LocalSTTProvider(BaseProvider):
             return self._model
 
         import asyncio
+
         loop = asyncio.get_event_loop()
 
         if self._engine == "faster_whisper":
@@ -241,6 +250,7 @@ class LocalSTTProvider(BaseProvider):
         if device == "auto":
             try:
                 import torch
+
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             except ImportError:
                 device = "cpu"
@@ -258,17 +268,23 @@ class LocalSTTProvider(BaseProvider):
 
     def _load_openai(self, model_size: str) -> Any:
         import whisper
+
         model_path = STT_MODEL_PATH or model_size
         return whisper.load_model(model_path)
 
     # ─── Transcription ────────────────────────────────────────────────────────
 
     async def _transcribe_faster(
-        self, model: Any, audio_path: str,
-        language: str | None, task: str,
-        word_timestamps: bool, context: ExecutionContext,
+        self,
+        model: Any,
+        audio_path: str,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        context: ExecutionContext,
     ) -> dict:
         import asyncio
+
         loop = asyncio.get_event_loop()
 
         def _run():
@@ -277,21 +293,34 @@ class LocalSTTProvider(BaseProvider):
                 language=language,
                 task=task,
                 word_timestamps=word_timestamps,
-                vad_filter=True,            # remove silence
+                vad_filter=True,  # remove silence
                 vad_parameters={"min_silence_duration_ms": 500},
             )
             segments = []
             full_text_parts = []
             for seg in segments_gen:
-                segments.append({
-                    "start": round(seg.start, 3),
-                    "end": round(seg.end, 3),
-                    "text": seg.text.strip(),
-                    **({"words": [
-                        {"word": w.word, "start": w.start, "end": w.end, "probability": w.probability}
-                        for w in seg.words
-                    ]} if word_timestamps and seg.words else {}),
-                })
+                segments.append(
+                    {
+                        "start": round(seg.start, 3),
+                        "end": round(seg.end, 3),
+                        "text": seg.text.strip(),
+                        **(
+                            {
+                                "words": [
+                                    {
+                                        "word": w.word,
+                                        "start": w.start,
+                                        "end": w.end,
+                                        "probability": w.probability,
+                                    }
+                                    for w in seg.words
+                                ]
+                            }
+                            if word_timestamps and seg.words
+                            else {}
+                        ),
+                    }
+                )
                 full_text_parts.append(seg.text.strip())
 
             return {
@@ -310,11 +339,16 @@ class LocalSTTProvider(BaseProvider):
         return result
 
     async def _transcribe_openai(
-        self, model: Any, audio_path: str,
-        language: str | None, task: str,
-        word_timestamps: bool, context: ExecutionContext,
+        self,
+        model: Any,
+        audio_path: str,
+        language: str | None,
+        task: str,
+        word_timestamps: bool,
+        context: ExecutionContext,
     ) -> dict:
         import asyncio
+
         loop = asyncio.get_event_loop()
 
         def _run():

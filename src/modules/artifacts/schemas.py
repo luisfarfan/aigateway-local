@@ -1,4 +1,5 @@
 """API schemas for the artifacts module."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -24,6 +25,7 @@ class UploadInputFileRequest(BaseModel):
     Used for image_edit (source image), speech_to_text (audio), etc.
     Returns a storage_key that is then referenced in the job's input payload.
     """
+
     filename: str = Field(..., min_length=1, max_length=255)
     mime_type: str = Field(..., description="e.g. 'image/png', 'audio/wav'")
     size_bytes: int = Field(..., ge=1)

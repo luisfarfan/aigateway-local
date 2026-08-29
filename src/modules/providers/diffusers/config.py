@@ -10,6 +10,7 @@ Each entry describes a model that can be loaded via Diffusers:
 MODEL_PATH env vars override the default HF Hub ID with a local path.
 Example: DIFFUSERS_MODEL_PATH_SDXL=/data/models/stable-diffusion-xl-base-1.0
 """
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,14 +23,15 @@ settings = get_settings()
 @dataclass
 class DiffusersModelSpec:
     """Spec for one loadable Diffusers model."""
-    model_id: str                       # canonical ID used in API requests
-    hf_repo_or_path: str               # HuggingFace Hub ID or absolute local path
-    pipeline_class: str                 # e.g. "StableDiffusionXLPipeline"
+
+    model_id: str  # canonical ID used in API requests
+    hf_repo_or_path: str  # HuggingFace Hub ID or absolute local path
+    pipeline_class: str  # e.g. "StableDiffusionXLPipeline"
     supported_job_types: list[JobType]
-    torch_dtype: str = "float16"       # float16 (GPU) | float32 (CPU)
+    torch_dtype: str = "float16"  # float16 (GPU) | float32 (CPU)
     use_safetensors: bool = True
-    variant: str | None = "fp16"       # HF variant (fp16, bf16, None)
-    vram_mb: int = 8192                # estimated VRAM requirement
+    variant: str | None = "fp16"  # HF variant (fp16, bf16, None)
+    vram_mb: int = 8192  # estimated VRAM requirement
     extra_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -43,6 +45,7 @@ def _resolve_path(model_id: str, default_hf_repo: str) -> str:
     """
     env_key = f"DIFFUSERS_MODEL_PATH_{model_id.upper().replace('-', '_')}"
     import os
+
     return os.environ.get(env_key, default_hf_repo)
 
 
@@ -50,7 +53,6 @@ def _resolve_path(model_id: str, default_hf_repo: str) -> str:
 # Add new models here. The model_id is what clients specify in the API request.
 
 SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
-
     "stable-diffusion-xl": DiffusersModelSpec(
         model_id="stable-diffusion-xl",
         hf_repo_or_path=_resolve_path(
@@ -62,7 +64,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         torch_dtype="float16",
         vram_mb=8192,
     ),
-
     "stable-diffusion-xl-refiner": DiffusersModelSpec(
         model_id="stable-diffusion-xl-refiner",
         hf_repo_or_path=_resolve_path(
@@ -74,7 +75,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         torch_dtype="float16",
         vram_mb=8192,
     ),
-
     "stable-diffusion-v1-5": DiffusersModelSpec(
         model_id="stable-diffusion-v1-5",
         hf_repo_or_path=_resolve_path(
@@ -86,7 +86,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         torch_dtype="float16",
         vram_mb=4096,
     ),
-
     "stable-diffusion-inpaint": DiffusersModelSpec(
         model_id="stable-diffusion-inpaint",
         hf_repo_or_path=_resolve_path(
@@ -98,7 +97,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         torch_dtype="float16",
         vram_mb=4096,
     ),
-
     "sdxl-turbo": DiffusersModelSpec(
         model_id="sdxl-turbo",
         hf_repo_or_path=_resolve_path(
@@ -112,7 +110,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         vram_mb=6144,
         extra_kwargs={"guidance_scale": 0.0, "num_inference_steps": 1},
     ),
-
     "zeroscope-v2": DiffusersModelSpec(
         model_id="zeroscope-v2",
         hf_repo_or_path=_resolve_path(
@@ -125,7 +122,6 @@ SUPPORTED_MODELS: dict[str, DiffusersModelSpec] = {
         variant=None,
         vram_mb=16384,
     ),
-
     "stable-video-diffusion": DiffusersModelSpec(
         model_id="stable-video-diffusion",
         hf_repo_or_path=_resolve_path(

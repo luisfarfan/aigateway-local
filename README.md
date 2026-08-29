@@ -660,7 +660,7 @@ Sin él, todo el gasto cae en un mismo balde y los reportes no sirven.
 | `X-Proxima-Project` | dimensiona costo y trazas |
 | `X-Proxima-No-Cache` | salta el cache en esta llamada |
 | `X-Proxima-Client` | etiqueta libre para el histórico |
-| `X-Proxima-No-Fallback` | falla en vez de probar el siguiente modelo de la cadena |
+| `X-Proxima-No-Fallback` | recorta la cadena a 1: falla en vez de degradar, tanto ante error como ante circuito abierto |
 
 ### Búsqueda web
 
@@ -855,6 +855,10 @@ Es un camino más estrecho que el normal, por razones que no son pereza:
 Los tokens **sí** se contabilizan: el gateway manda `stream_options.include_usage` y
 lee el `usage` del último chunk. Se cuenta incluso si el cliente corta a mitad — quien
 abandona el turno igual consumió.
+
+El fallback en streaming **tampoco es silencioso**: cada modelo saltado (circuito
+abierto) o fallido queda en `llm_attempts` con su propio nombre y su error, no con el
+del modelo que acabó respondiendo. Así se puede ver *por qué* una petición degradó.
 
 ### Function calling
 
@@ -1354,15 +1358,25 @@ unitario veía, porque el schema estricto no llevaba `type` en los nodos `const`
 Un agente con bucle de herramientas (tipo Strix) pide cosas que un chat simple no.
 Lo que conviene saber antes de apuntarlo aquí:
 
-**1. Nombra el modelo explícitamente.** La cadena de `chat` termina en
-`ollama/qwen2.5:7b` como red de seguridad. Para una respuesta suelta está bien; para
-un bucle agéntico es mal candidato — daría muchos turnos de ruido en vez de fallar
-rápido. Un modelo nombrado va **primero** en la cadena, y si además quieres que falle
-en vez de degradar:
+**1. Nombra el modelo y usa `X-Proxima-No-Fallback`.** La cadena de `chat` está
+ordenada rápido/barato primero (`gemini-3-flash`), así que **el fallback no preserva
+capacidad**: si pides `claude-sonnet-4-6` —el modelo más potente de la cadena— y no
+está disponible, caes a `gemini-3-flash`, que es el #1 genérico. No hay un modelo más
+potente al que caer: claude ya es el techo. Para un agente eso es peor que fallar —
+recibe respuestas de un modelo más débil que no sostiene el bucle.
 
 ```
 X-Proxima-No-Fallback: 1
 ```
+
+Con esa cabecera la cadena se recorta a un solo candidato: si el modelo pedido falla
+**o tiene el circuito abierto**, la petición devuelve 503 en vez de degradar. El agente
+reintenta, que es lo correcto.
+
+Ojo con el circuit breaker: 5 fallos en 60 s abren el circuito de un modelo 120 s
+(`config/routing.yaml`). Un scan agéntico largo que satura a claude lo abre en bucle, y
+sin la cabecera cada request de esa ventana salta a gemini-flash. Con la cabecera,
+falla claro. Si el breaker te resulta agresivo para tu carga, sube `failure_threshold`.
 
 **2. Comprueba quién respondió.** En JSON está en `model`, y si hubo salto,
 `proxima.fell_back_from`. En streaming, la cabecera `X-Proxima-Served-By`.

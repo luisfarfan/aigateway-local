@@ -12,6 +12,7 @@ Concrete adapters live in:
   src/modules/providers/local_llm/provider.py
   src/modules/providers/stub/provider.py
 """
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -22,6 +23,7 @@ from src.core.domain import JobType, Modality
 
 # ─── Capability declaration ────────────────────────────────────────────────────
 
+
 @dataclass
 class ProviderCapability:
     """
@@ -29,13 +31,14 @@ class ProviderCapability:
     Registered in the ProviderRegistry at startup; queried by the scheduler
     for resource-aware routing decisions.
     """
+
     provider_id: str
     supported_job_types: list[JobType]
     supported_models: list[str]
     modality: Modality
     max_concurrent_jobs: int = 1
     requires_gpu: bool = False
-    estimated_vram_mb: int | None = None   # None = unknown / CPU-only
+    estimated_vram_mb: int | None = None  # None = unknown / CPU-only
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -55,6 +58,7 @@ class ExecutionContext:
     Everything a provider needs to execute a job.
     Constructed by the worker and passed into BaseProvider.execute().
     """
+
     job_id: UUID
     job_type: JobType
     provider_id: str
@@ -72,12 +76,14 @@ class ExecutionContext:
 
 # ─── Provider result ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class ProviderResult:
     """
     What a provider returns after executing a job.
     Workers translate this into DB updates and SSE events.
     """
+
     success: bool
     result_summary: dict[str, Any] = field(default_factory=dict)
     # Storage keys of output files (registered via on_artifact during execution)
@@ -89,6 +95,7 @@ class ProviderResult:
 
 
 # ─── Base provider (the Port) ──────────────────────────────────────────────────
+
 
 class BaseProvider(ABC):
     """

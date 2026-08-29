@@ -46,7 +46,7 @@ class VideoAssemblerProvider(BaseProvider):
     async def initialize(self) -> None:
         """Verify moviepy is installed."""
         try:
-            import moviepy # noqa
+            import moviepy  # noqa
         except ImportError:
             log.warning("moviepy_not_installed", hint="Run: pip install moviepy pysrt")
 
@@ -95,20 +95,26 @@ class VideoAssemblerProvider(BaseProvider):
 
                     # Add subtitles (hardcoded)
                     if text:
-                        txt_clip = TextClip(
-                            text,
-                            fontsize=payload.get("fontsize", 40),
-                            color=payload.get("font_color", "white"),
-                            font=payload.get("font", "Arial"),
-                            bg_color="black",
-                            method="caption",
-                            size=(video_clip.w * 0.9, None),
-                        ).set_duration(duration).set_position(("center", "bottom"))
-                        
+                        txt_clip = (
+                            TextClip(
+                                text,
+                                fontsize=payload.get("fontsize", 40),
+                                color=payload.get("font_color", "white"),
+                                font=payload.get("font", "Arial"),
+                                bg_color="black",
+                                method="caption",
+                                size=(video_clip.w * 0.9, None),
+                            )
+                            .set_duration(duration)
+                            .set_position(("center", "bottom"))
+                        )
+
                         video_clip = CompositeVideoClip([video_clip, txt_clip])
 
                     clips.append(video_clip)
-                    await context.on_progress(5.0 + (i + 1) / len(scenes) * 40.0, f"Processed scene {i+1}")
+                    await context.on_progress(
+                        5.0 + (i + 1) / len(scenes) * 40.0, f"Processed scene {i + 1}"
+                    )
 
                 if not clips:
                     return ProviderResult(success=False, error_message="Failed to build any clips")
@@ -116,21 +122,18 @@ class VideoAssemblerProvider(BaseProvider):
                 await context.on_progress(50.0, "Rendering final video")
 
                 from moviepy import concatenate_videoclips
+
                 final_video = concatenate_videoclips(clips, method="compose")
 
                 output_path = os.path.join(tmp_dir, "output.mp4")
-                
+
                 # Run render in thread to not block event loop
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(
                     None,
                     lambda: final_video.write_videofile(
-                        output_path,
-                        fps=fps,
-                        codec="libx264",
-                        audio_codec="aac",
-                        logger=None
-                    )
+                        output_path, fps=fps, codec="libx264", audio_codec="aac", logger=None
+                    ),
                 )
 
                 # Upload result

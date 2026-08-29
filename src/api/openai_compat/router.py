@@ -15,6 +15,7 @@ ni siquiera funciona por la superficie OpenAI (ver `translate.py`).
 from __future__ import annotations
 
 import json
+import time
 from contextlib import AsyncExitStack
 from dataclasses import replace
 from typing import Any
@@ -238,7 +239,11 @@ def _routing(request: Request) -> tuple[RoutingTable, CircuitBreaker]:
     """
     table = load_routing()
     if request.headers.get("X-Proxima-No-Fallback"):
-        table = replace(table, fallback_on=frozenset())
+        # single_candidate recorta la cadena a 1: cubre TANTO el salto tras error
+        # (fallback_on vacío) COMO el salto por circuito abierto (no hay segundo
+        # candidato al que saltar). Sin esto, un circuito abierto degradaba a un
+        # modelo más débil pese a la cabecera.
+        table = replace(table, fallback_on=frozenset(), single_candidate=True)
     return table, CircuitBreaker(table.breaker)
 
 
@@ -344,7 +349,13 @@ async def _structured(
     except InvalidStructuredOutput as exc:
         obs.attempts = [
             AttemptRecord(
-                a.number, a.outcome, a.duration_s, a.prompt_tokens, a.completion_tokens, a.error
+                number=a.number,
+                outcome=a.outcome,
+                model=model,
+                duration_s=a.duration_s,
+                prompt_tokens=a.prompt_tokens,
+                completion_tokens=a.completion_tokens,
+                error=a.error,
             )
             for a in exc.attempts
         ]
@@ -375,7 +386,13 @@ async def _structured(
 
     obs.attempts = [
         AttemptRecord(
-            a.number, a.outcome, a.duration_s, a.prompt_tokens, a.completion_tokens, a.error
+            number=a.number,
+            outcome=a.outcome,
+            model=guarded.model,
+            duration_s=a.duration_s,
+            prompt_tokens=a.prompt_tokens,
+            completion_tokens=a.completion_tokens,
+            error=a.error,
         )
         for a in guarded.attempts
     ]
@@ -534,10 +551,19 @@ async def _stream_completions(
     chunks = None
     served_by = None
     last_error: Exception | None = None
+    # Cada modelo probado deja aquí su rastro: saltado por circuito abierto, o
+    # fallado con su error. Antes el streaming sólo anotaba `fell_back_from`, así
+    # que los fallos que abrían el circuito —el motivo real de una degradación—
+    # no quedaban en ningún lado. Ahora el fallback en streaming tampoco es
+    # silencioso.
+    attempts: list[AttemptRecord] = []
 
-    for model in candidates:
+    for index, model in enumerate(candidates, start=1):
         if await breaker.is_open(model):
+            attempts.append(AttemptRecord(number=index, outcome="skipped_open", model=model))
+            log.info("routing.skipped_open", route="chat", model=model, streaming=True)
             continue
+        started = time.monotonic()
         try:
             resolved = _resolve(registry, model)
             obs.family = str(await resolved.backend.family_of(resolved.model))
@@ -552,12 +578,28 @@ async def _stream_completions(
                 )
             )
             served_by = model
+            attempts.append(AttemptRecord(number=index, outcome="ok", model=model))
             break
         except Exception as exc:  # noqa: BLE001 — se clasifica abajo
             last_error = exc
+            kind = routing_errors.kind_of(exc)
+            attempts.append(
+                AttemptRecord(
+                    number=index,
+                    outcome=kind,
+                    model=model,
+                    duration_s=time.monotonic() - started,
+                    error=str(exc)[:300],
+                )
+            )
             await breaker.record_failure(model)
-            if not table.should_fallback(routing_errors.kind_of(exc)):
+            log.warning("routing.stream_failed", route="chat", model=model, kind=kind)
+            if not table.should_fallback(kind):
                 break
+
+    # El rastro se publica pase lo que pase: también cuando toda la cadena falla.
+    obs.attempts = attempts
+    obs.meta["routing"] = [{"model": a.model, "outcome": a.outcome} for a in attempts]
 
     if chunks is None:
         await stack.aclose()
@@ -602,6 +644,12 @@ async def _stream_completions(
             # el turno igual consumió tokens, y deben quedar contabilizados.
             obs.prompt_tokens = state["prompt_tokens"]
             obs.completion_tokens = state["completion_tokens"]
+            # El intento que respondió lleva sus tokens, para que la fila de
+            # `llm_attempts` cuadre con la de `llm_requests`.
+            for attempt in obs.attempts:
+                if attempt.outcome == "ok":
+                    attempt.prompt_tokens = state["prompt_tokens"]
+                    attempt.completion_tokens = state["completion_tokens"]
             obs.succeeded(model=state["model"])
             await stack.aclose()
 

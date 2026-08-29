@@ -9,6 +9,7 @@ Responsibilities:
 Workers and services call `await publisher.publish(event)`.
 They don't know about Redis channels or SSE wire format.
 """
+
 from uuid import UUID
 
 import structlog

@@ -18,6 +18,7 @@ Progress reporting:
   - We bridge this by scheduling async callbacks on the event loop from the sync thread.
   - Generation runs in run_in_executor (thread pool) to avoid blocking the event loop.
 """
+
 import asyncio
 import io
 from typing import Any
@@ -45,9 +46,9 @@ class DiffusersProvider(BaseProvider):
     """
 
     def __init__(self) -> None:
-        self._pipelines: dict[str, Any] = {}          # model_id → loaded pipeline
-        self._locks: dict[str, asyncio.Lock] = {}      # model_id → loading lock
-        self._device: str = "cpu"                      # set in initialize()
+        self._pipelines: dict[str, Any] = {}  # model_id → loaded pipeline
+        self._locks: dict[str, asyncio.Lock] = {}  # model_id → loading lock
+        self._device: str = "cpu"  # set in initialize()
         self._initialized = False
 
     # ─── Port implementation ──────────────────────────────────────────────────
@@ -67,9 +68,9 @@ class DiffusersProvider(BaseProvider):
             supported_job_types=list(all_supported_types),
             supported_models=list(SUPPORTED_MODELS.keys()),
             modality=Modality.IMAGE,
-            max_concurrent_jobs=1,      # GPU can only handle one at a time
+            max_concurrent_jobs=1,  # GPU can only handle one at a time
             requires_gpu=True,
-            estimated_vram_mb=8192,     # conservative default
+            estimated_vram_mb=8192,  # conservative default
         )
 
     def supports(self, job_type: JobType, model: str | None = None) -> bool:
@@ -87,6 +88,7 @@ class DiffusersProvider(BaseProvider):
             return
         try:
             import torch
+
             if torch.cuda.is_available():
                 self._device = "cuda"
             elif torch.backends.mps.is_available():
@@ -139,6 +141,7 @@ class DiffusersProvider(BaseProvider):
         """Unload all pipelines from GPU memory."""
         try:
             import torch
+
             for model_id, pipe in self._pipelines.items():
                 del pipe
                 log.info("diffusers_model_unloaded", model_id=model_id)
@@ -151,9 +154,10 @@ class DiffusersProvider(BaseProvider):
     async def health_check(self) -> dict[str, Any]:
         try:
             import torch
+
             vram_free = None
             if torch.cuda.is_available():
-                vram_free = torch.cuda.mem_get_info()[0] // (1024 ** 2)
+                vram_free = torch.cuda.mem_get_info()[0] // (1024**2)
         except ImportError:
             vram_free = None
 
@@ -267,6 +271,7 @@ class DiffusersProvider(BaseProvider):
                 kwargs["negative_prompt"] = payload["negative_prompt"]
             if payload.get("seed") is not None:
                 import torch
+
                 kwargs["generator"] = torch.Generator(device=self._device).manual_seed(
                     int(payload["seed"])
                 )
@@ -282,6 +287,7 @@ class DiffusersProvider(BaseProvider):
         context: ExecutionContext,
     ) -> ProviderResult:
         from PIL import Image
+
         payload = context.input_payload
         steps = int(payload.get("steps", 30))
         loop = asyncio.get_event_loop()
@@ -321,6 +327,7 @@ class DiffusersProvider(BaseProvider):
                 kwargs["negative_prompt"] = payload["negative_prompt"]
             if payload.get("seed") is not None:
                 import torch
+
                 kwargs["generator"] = torch.Generator(device=self._device).manual_seed(
                     int(payload["seed"])
                 )
@@ -361,6 +368,7 @@ class DiffusersProvider(BaseProvider):
 
     async def _save_images(self, images: list[Any], context: ExecutionContext) -> ProviderResult:
         import torch
+
         artifact_keys: list[str] = []
 
         for i, image in enumerate(images):
@@ -379,8 +387,9 @@ class DiffusersProvider(BaseProvider):
         vram_used = None
         try:
             import torch
+
             if torch.cuda.is_available():
-                vram_used = torch.cuda.memory_allocated() // (1024 ** 2)
+                vram_used = torch.cuda.memory_allocated() // (1024**2)
         except Exception:
             pass
 
@@ -394,9 +403,7 @@ class DiffusersProvider(BaseProvider):
             execution_metadata={"vram_allocated_mb": vram_used, "device": self._device},
         )
 
-    async def _save_video(
-        self, frames: Any, context: ExecutionContext, fps: int
-    ) -> ProviderResult:
+    async def _save_video(self, frames: Any, context: ExecutionContext, fps: int) -> ProviderResult:
         try:
             import imageio
             import numpy as np

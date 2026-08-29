@@ -4,6 +4,7 @@ Job service — business logic for job lifecycle management.
 Orchestrates: validation → idempotency check → DB persist → event publish → enqueue.
 The service is the only place that coordinates across repository, publisher, and dispatcher.
 """
+
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -70,9 +71,7 @@ class JobService:
         except ValueError as e:
             if "not registered" in str(e):
                 raise ProviderNotFoundError(request.provider) from e
-            raise ProviderNotSupportedError(
-                request.provider, request.type, request.model
-            ) from e
+            raise ProviderNotSupportedError(request.provider, request.type, request.model) from e
 
         # 2. Idempotency check — return existing job if key already used
         if request.idempotency_key:
@@ -101,9 +100,7 @@ class JobService:
         job = await self._repo.create(job)
 
         # 4. Publish job_created event (Redis + DB)
-        await self._pub.publish(
-            SSEEvents.job_created(job.id, request.provider, request.model)
-        )
+        await self._pub.publish(SSEEvents.job_created(job.id, request.provider, request.model))
 
         # 5. Enqueue to ARQ priority queue
         await enqueue_job(self._arq, job.id, request.priority)
@@ -166,6 +163,7 @@ class JobService:
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _to_response(job: Job, artifacts: list) -> JobResponse:
     return JobResponse(

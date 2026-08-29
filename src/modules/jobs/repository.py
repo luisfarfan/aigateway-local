@@ -4,6 +4,7 @@ Job repository — all DB access for the jobs module.
 No business logic here. The service layer calls the repository.
 The repository only knows about SQLModel/SQLAlchemy operations.
 """
+
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -39,7 +40,9 @@ class JobRepository:
         result = await self._s.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def find_all(self, filters: JobListFilters, client_id: str | None = None) -> tuple[list[Job], int]:
+    async def find_all(
+        self, filters: JobListFilters, client_id: str | None = None
+    ) -> tuple[list[Job], int]:
         stmt = select(Job)
         count_stmt = select(func.count()).select_from(Job)
 
@@ -62,11 +65,7 @@ class JobRepository:
         total = (await self._s.execute(count_stmt)).scalar_one()
 
         offset = (filters.page - 1) * filters.page_size
-        stmt = (
-            stmt.order_by(col(Job.created_at).desc())
-            .offset(offset)
-            .limit(filters.page_size)
-        )
+        stmt = stmt.order_by(col(Job.created_at).desc()).offset(offset).limit(filters.page_size)
         jobs = list((await self._s.execute(stmt)).scalars().all())
         return jobs, total
 
@@ -114,9 +113,7 @@ class JobRepository:
         Validates the state machine transition before writing.
         """
         if not job.status.can_transition_to(new_status):
-            raise ValueError(
-                f"Invalid transition: {job.status} → {new_status} for job {job.id}"
-            )
+            raise ValueError(f"Invalid transition: {job.status} → {new_status} for job {job.id}")
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         job.status = new_status

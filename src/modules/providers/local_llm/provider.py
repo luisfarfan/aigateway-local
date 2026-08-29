@@ -11,6 +11,7 @@ IMPORTANT — safe to import without Ollama/Transformers installed.
 All backend imports are inside methods. Will fail gracefully at runtime
 with a clear error message if the backend isn't available.
 """
+
 import asyncio
 import io
 from typing import Any
@@ -56,8 +57,8 @@ class LocalLLMProvider(BaseProvider):
             supported_job_types=[JobType.TEXT_GENERATION, JobType.TEXT_EMBEDDING],
             supported_models=list(SUPPORTED_MODELS.keys()),
             modality=Modality.TEXT,
-            max_concurrent_jobs=2,   # text is less VRAM-intensive
-            requires_gpu=False,      # can run CPU, GPU preferred
+            max_concurrent_jobs=2,  # text is less VRAM-intensive
+            requires_gpu=False,  # can run CPU, GPU preferred
             estimated_vram_mb=None,  # varies per model
         )
 
@@ -71,9 +72,11 @@ class LocalLLMProvider(BaseProvider):
     async def initialize(self) -> None:
         """Verify Ollama is reachable (if using ollama backend)."""
         from src.modules.providers.local_llm.config import BACKEND
+
         if BACKEND == "ollama":
             try:
                 import httpx
+
                 async with httpx.AsyncClient() as client:
                     r = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5.0)
                     models = [m["name"] for m in r.json().get("models", [])]
@@ -94,8 +97,7 @@ class LocalLLMProvider(BaseProvider):
             return ProviderResult(
                 success=False,
                 error_message=(
-                    f"Unknown model '{model_id}'. "
-                    f"Available: {list(SUPPORTED_MODELS.keys())}"
+                    f"Unknown model '{model_id}'. Available: {list(SUPPORTED_MODELS.keys())}"
                 ),
             )
 
@@ -123,6 +125,7 @@ class LocalLLMProvider(BaseProvider):
         ollama_models: list[str] = []
         try:
             import httpx
+
             async with httpx.AsyncClient() as client:
                 r = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=3.0)
                 ollama_models = [m["name"] for m in r.json().get("models", [])]
@@ -185,6 +188,7 @@ class LocalLLMProvider(BaseProvider):
                         if not line:
                             continue
                         import json
+
                         chunk = json.loads(line)
                         if chunk.get("message", {}).get("content"):
                             token = chunk["message"]["content"]
@@ -229,9 +233,7 @@ class LocalLLMProvider(BaseProvider):
             execution_metadata={"backend": "ollama", "token_count": token_count},
         )
 
-    async def _embed_ollama(
-        self, spec: LLMModelSpec, context: ExecutionContext
-    ) -> ProviderResult:
+    async def _embed_ollama(self, spec: LLMModelSpec, context: ExecutionContext) -> ProviderResult:
         """Generates embeddings via Ollama's /api/embed endpoint."""
         try:
             import httpx
@@ -293,6 +295,7 @@ class LocalLLMProvider(BaseProvider):
 
         def _generate_sync() -> str:
             import torch
+
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
             with torch.no_grad():
                 output = model.generate(
@@ -302,7 +305,9 @@ class LocalLLMProvider(BaseProvider):
                     do_sample=True,
                     top_p=float(payload.get("top_p", 0.9)),
                 )
-            return tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            return tokenizer.decode(
+                output[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True
+            )
 
         await context.on_progress(10.0, "Generating")
         text = await loop.run_in_executor(None, _generate_sync)
@@ -350,6 +355,7 @@ class LocalLLMProvider(BaseProvider):
             ) from e
 
         import torch
+
         load_kwargs: dict[str, Any] = {"device_map": "auto"}
 
         if spec.quantization == "4bit":

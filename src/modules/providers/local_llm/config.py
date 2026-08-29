@@ -19,18 +19,19 @@ Model registry:
   Keys are the model_id strings clients send in API requests.
   Values configure how the model is loaded/called.
 """
+
 import os
 from dataclasses import dataclass, field
 
 
 @dataclass
 class LLMModelSpec:
-    model_id: str                       # what the client sends: e.g. "llama3.2"
-    backend: str                        # "ollama" | "transformers"
-    ollama_model: str | None = None    # name in ollama: e.g. "llama3.2:8b"
-    hf_repo_or_path: str | None = None # HF Hub ID or local path
+    model_id: str  # what the client sends: e.g. "llama3.2"
+    backend: str  # "ollama" | "transformers"
+    ollama_model: str | None = None  # name in ollama: e.g. "llama3.2:8b"
+    hf_repo_or_path: str | None = None  # HF Hub ID or local path
     context_length: int = 4096
-    quantization: str | None = None    # "4bit" | "8bit" | None (transformers only)
+    quantization: str | None = None  # "4bit" | "8bit" | None (transformers only)
     vram_mb: int = 8192
 
 
@@ -52,7 +53,6 @@ OLLAMA_BASE_URL = _settings.ollama_base_url
 # For Transformers: set LOCAL_LLM_PATH_{ID} to the local model directory.
 
 SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
-
     "llama3.1": LLMModelSpec(
         model_id="llama3.1",
         backend="ollama",
@@ -60,7 +60,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=8192,
         vram_mb=6144,
     ),
-
     "llama3.2": LLMModelSpec(
         model_id="llama3.2",
         backend="ollama",
@@ -68,7 +67,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=8192,
         vram_mb=6144,
     ),
-
     "llama3.2:3b": LLMModelSpec(
         model_id="llama3.2:3b",
         backend="ollama",
@@ -76,7 +74,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=8192,
         vram_mb=3072,
     ),
-
     "mistral": LLMModelSpec(
         model_id="mistral",
         backend="ollama",
@@ -84,7 +81,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=8192,
         vram_mb=5120,
     ),
-
     "mixtral": LLMModelSpec(
         model_id="mixtral",
         backend="ollama",
@@ -92,7 +88,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=32768,
         vram_mb=24576,
     ),
-
     "qwen2.5": LLMModelSpec(
         model_id="qwen2.5",
         backend="ollama",
@@ -100,7 +95,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=32768,
         vram_mb=8192,
     ),
-
     "deepseek-r1": LLMModelSpec(
         model_id="deepseek-r1",
         backend="ollama",
@@ -108,7 +102,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=65536,
         vram_mb=16384,
     ),
-
     "codellama": LLMModelSpec(
         model_id="codellama",
         backend="ollama",
@@ -116,7 +109,6 @@ SUPPORTED_MODELS: dict[str, LLMModelSpec] = {
         context_length=16384,
         vram_mb=7168,
     ),
-
     # Transformers backend example — uses local path if env var is set
     "llama3-hf": LLMModelSpec(
         model_id="llama3-hf",

@@ -8,6 +8,7 @@ Clients must send their key in one of two ways:
 The client_id derived from the key is used for rate limiting, event scoping,
 and audit logging. It is a short hash of the key — never the key itself.
 """
+
 import hashlib
 
 import structlog

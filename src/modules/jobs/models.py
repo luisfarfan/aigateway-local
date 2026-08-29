@@ -4,6 +4,7 @@ SQLModel table definitions for the jobs module.
 SQLModel unifies the SQLAlchemy ORM model and the Pydantic schema in one class.
 Tables defined here are the source of truth for DB schema — Alembic reads from them.
 """
+
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -27,8 +28,8 @@ class Job(SQLModel, table=True):
     priority: JobPriority = Field(default=JobPriority.NORMAL, index=True)
 
     # Routing — which engine handles this job
-    provider: str = Field(index=True)       # e.g. "diffusers", "local_tts", "stub"
-    model: str | None = Field(default=None) # e.g. "stable-diffusion-xl"
+    provider: str = Field(index=True)  # e.g. "diffusers", "local_tts", "stub"
+    model: str | None = Field(default=None)  # e.g. "stable-diffusion-xl"
 
     # Payload — flexible JSON, validated at API layer by Pydantic schemas
     input_payload: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
@@ -68,6 +69,7 @@ class JobEvent(SQLModel, table=True):
     Persisted log of every SSE event emitted for a job.
     Used to replay missed events when a client reconnects (Last-Event-ID).
     """
+
     __tablename__ = "job_events"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -79,14 +81,15 @@ class JobEvent(SQLModel, table=True):
 
 class Artifact(SQLModel, table=True):
     """An output file or data blob produced by a job, stored in MinIO."""
+
     __tablename__ = "artifacts"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     job_id: UUID = Field(foreign_key="jobs.id", index=True)
-    artifact_type: str                   # ArtifactType enum value
+    artifact_type: str  # ArtifactType enum value
     filename: str
-    storage_key: str                     # MinIO object key: jobs/{job_id}/outputs/{filename}
-    public_url: str | None = None        # presigned URL (refreshed on demand)
+    storage_key: str  # MinIO object key: jobs/{job_id}/outputs/{filename}
+    public_url: str | None = None  # presigned URL (refreshed on demand)
     mime_type: str | None = None
     size_bytes: int | None = None
     extra_data: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
@@ -95,31 +98,31 @@ class Artifact(SQLModel, table=True):
 
 class RegisteredModel(SQLModel, table=True):
     """Catalog of AI models available on this machine, per provider."""
+
     __tablename__ = "registered_models"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    provider: str = Field(index=True)          # matches BaseProvider.provider_id
-    model_id: str = Field(index=True)          # e.g. "stable-diffusion-xl"
-    modality: str                              # Modality enum value
+    provider: str = Field(index=True)  # matches BaseProvider.provider_id
+    model_id: str = Field(index=True)  # e.g. "stable-diffusion-xl"
+    modality: str  # Modality enum value
     display_name: str | None = None
     description: str | None = None
     is_available: bool = Field(default=True, index=True)
     # What the model supports: {"supports_negative_prompt": true, "max_steps": 150, ...}
     capabilities: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     # Resource needs: {"vram_mb": 8192, "ram_mb": 4096}
-    resource_requirements: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSON)
-    )
+    resource_requirements: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     registered_at: datetime = Field(default_factory=_utcnow)
 
 
 class WorkerRuntime(SQLModel, table=True):
     """Live heartbeat record for each active worker process."""
+
     __tablename__ = "worker_runtimes"
 
-    id: str = Field(primary_key=True)          # stable worker_id string
-    modality: str                              # which modality this worker handles
-    status: str = Field(default="idle")        # "idle" | "busy" | "offline"
+    id: str = Field(primary_key=True)  # stable worker_id string
+    modality: str  # which modality this worker handles
+    status: str = Field(default="idle")  # "idle" | "busy" | "offline"
     current_job_id: UUID | None = None
     jobs_processed: int = Field(default=0)
     jobs_failed: int = Field(default=0)

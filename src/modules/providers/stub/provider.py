@@ -10,6 +10,7 @@ Used for:
 
 This is a complete, working implementation — not pseudocode.
 """
+
 import asyncio
 from typing import Any
 from uuid import UUID
@@ -56,7 +57,7 @@ class StubProvider(BaseProvider):
             provider_id="stub",
             supported_job_types=list(JobType),  # supports everything
             supported_models=["stub-model", "stub-fast"],
-            modality=Modality.TEXT,              # stub lives in the text worker
+            modality=Modality.TEXT,  # stub lives in the text worker
             max_concurrent_jobs=10,
             requires_gpu=False,
             estimated_vram_mb=None,

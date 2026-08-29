@@ -36,6 +36,10 @@ log = structlog.get_logger(__name__)
 class AttemptRecord:
     number: int
     outcome: str
+    # El modelo de ESTE intento, que puede no ser el que acabó respondiendo:
+    # un fallback recorre varios. Sin esto, `_persist` etiquetaba todos con el
+    # modelo final y "claude falló" quedaba registrado como gemini.
+    model: str = ""
     duration_s: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -220,12 +224,18 @@ async def _persist(obs: Observation, cost: Cost, duration: float, span: Any) -> 
     try:
         async with AsyncSessionLocal() as session:
             session.add(request)
+            # Flush del padre ANTES de los hijos: sin esto el orden de inserción
+            # no está garantizado y los `llm_attempts` pueden salir antes que su
+            # `llm_request`, violando la FK y tumbando el commit ENTERO — con lo
+            # que ni el request ni los intentos quedan. Era latente hasta que el
+            # camino de streaming empezó a generar intentos.
+            await session.flush()
             for attempt in obs.attempts:
                 session.add(
                     LLMAttempt(
                         request_id=request.id,
                         number=attempt.number,
-                        model=obs.response_model or obs.requested_model,
+                        model=attempt.model or obs.response_model or obs.requested_model,
                         outcome=attempt.outcome,
                         prompt_tokens=attempt.prompt_tokens,
                         completion_tokens=attempt.completion_tokens,

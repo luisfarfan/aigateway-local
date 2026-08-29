@@ -14,6 +14,7 @@ Config env vars:
   XTTS_MODEL_PATH=/data/models/xtts_v2        (optional, uses HF Hub if not set)
   PIPER_MODELS_DIR=/data/models/piper
 """
+
 import asyncio
 import io
 import os
@@ -34,6 +35,7 @@ from src.modules.providers.base import (
 log = structlog.get_logger(__name__)
 
 from src.core.config import get_settings
+
 _settings = get_settings()
 
 TTS_ENGINE = _settings.local_tts_engine
@@ -75,7 +77,7 @@ class LocalTTSProvider(BaseProvider):
             supported_models=["xtts_v2", "kokoro", "piper"],
             modality=Modality.AUDIO,
             max_concurrent_jobs=2,
-            requires_gpu=False,          # TTS can run on CPU, GPU speeds it up
+            requires_gpu=False,  # TTS can run on CPU, GPU speeds it up
             estimated_vram_mb=2048,
         )
 
@@ -111,7 +113,7 @@ class LocalTTSProvider(BaseProvider):
             return ProviderResult(
                 success=False,
                 error_message=f"Unknown TTS engine: '{TTS_ENGINE}'. "
-                              f"Set LOCAL_TTS_ENGINE to: xtts | kokoro | piper",
+                f"Set LOCAL_TTS_ENGINE to: xtts | kokoro | piper",
             )
 
     async def cancel(self, job_id: UUID) -> bool:
@@ -202,6 +204,7 @@ class LocalTTSProvider(BaseProvider):
             samples, sample_rate = pipeline(text, voice=voice)
             buf = io.BytesIO()
             import soundfile as sf
+
             sf.write(buf, samples, sample_rate, format=output_format.upper())
             buf.seek(0)
             return buf.read()
@@ -253,9 +256,10 @@ class LocalTTSProvider(BaseProvider):
             piper_voice = PiperVoice.load(model_path)
             buf = io.BytesIO()
             import wave
+
             with wave.open(buf, "wb") as wav_file:
                 wav_file.setnchannels(1)  # Piper is mono
-                wav_file.setsampwidth(2)   # 16-bit
+                wav_file.setsampwidth(2)  # 16-bit
                 wav_file.setframerate(piper_voice.config.sample_rate)
                 piper_voice.synthesize(text, wav_file)
             buf.seek(0)

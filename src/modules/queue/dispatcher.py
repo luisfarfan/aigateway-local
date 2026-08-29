@@ -12,6 +12,7 @@ Priority → ARQ queue name mapping:
 
 Workers listen to all three queues in priority order.
 """
+
 from uuid import UUID
 
 import structlog
@@ -48,7 +49,7 @@ async def enqueue_job(
     try:
         arq_job = await arq.enqueue_job(
             EXECUTE_JOB_TASK,
-            str(job_id),           # workers receive the domain job_id as a string
+            str(job_id),  # workers receive the domain job_id as a string
             _queue_name=queue_name,
         )
         log.info(

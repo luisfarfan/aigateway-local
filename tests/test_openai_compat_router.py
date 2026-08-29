@@ -759,3 +759,91 @@ async def test_sin_la_cabecera_si_recorre_la_cadena():
         json={"messages": [{"role": "user", "content": "x"}]},
     )
     assert len(fake.calls) > 1
+
+
+# ─── Fallback en streaming: observabilidad y No-Fallback ──────────────────────
+
+
+class FakeSkipBackend(FakeStreamingBackend):
+    """Streaming que resuelve family sin tocar red."""
+
+    async def family_of(self, model: str) -> str:
+        return "antigravity"
+
+
+@pytest.mark.asyncio
+async def test_streaming_registra_el_modelo_saltado_por_circuito_abierto(monkeypatch):
+    """El hueco que dejó al usuario a ciegas: un modelo saltado por circuito
+    abierto no dejaba rastro. Ahora cada intento —saltado o fallido— queda en
+    `obs.attempts` con SU modelo, no con el que acabó respondiendo."""
+    from src.modules.observability import recorder
+    from src.modules.routing.breaker import CircuitBreaker
+
+    capturado: list[Any] = []
+    original = recorder.Observation.succeeded
+
+    def espia(self, *, model=None):
+        capturado.append(list(self.attempts))
+        original(self, model=model)
+
+    # Circuito abierto para el primer candidato de la cadena chat.
+    async def is_open(self, model):
+        return model == "gemini-3-flash"
+
+    monkeypatch.setattr(recorder.Observation, "succeeded", espia)
+    monkeypatch.setattr(CircuitBreaker, "is_open", is_open)
+    transport = ASGITransport(app=build_app(FakeSkipBackend()))
+    async with (
+        AsyncClient(transport=transport, base_url="http://test") as http,
+        http.stream(
+            "POST",
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+        ) as response,
+    ):
+        async for _ in response.aiter_bytes():
+            pass
+
+    attempts = capturado[0]
+    saltado = next(a for a in attempts if a.outcome == "skipped_open")
+    servido = next(a for a in attempts if a.outcome == "ok")
+    assert saltado.model == "gemini-3-flash"  # el saltado, con SU nombre
+    assert servido.model != "gemini-3-flash"  # otro respondió
+    assert servido.model == attempts[1].model
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_no_degrada_ante_circuito_abierto(monkeypatch):
+    """La corrección de fondo: con la cabecera, si el modelo pedido tiene el
+    circuito abierto, la petición FALLA. Antes degradaba a gemini-flash pese a
+    la cabecera, porque el salto por circuito es otra rama que `fallback_on` no
+    tocaba."""
+    from src.modules.routing.breaker import CircuitBreaker
+
+    async def is_open(self, model):
+        return True  # todo cerrado el paso
+
+    monkeypatch.setattr(CircuitBreaker, "is_open", is_open)
+    response = await call(
+        build_app(FakeSkipBackend()),
+        "POST",
+        "/v1/chat/completions",
+        json={"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "x"}]},
+        headers={"X-Proxima-No-Fallback": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["type"] == "no_candidates"
+
+
+def test_no_fallback_recorta_la_cadena_a_un_candidato():
+    """Sin la cabecera, un modelo pedido encabeza la cadena entera. Con ella,
+    la cadena es sólo ese modelo: no hay a dónde degradar."""
+    from dataclasses import replace
+
+    from src.modules.routing.config import load_routing
+
+    table = load_routing()
+    nf = replace(table, single_candidate=True)
+    assert nf.candidates("chat", "claude-sonnet-4-6") == ["claude-sonnet-4-6"]
+    assert len(table.candidates("chat", "claude-sonnet-4-6")) > 1
