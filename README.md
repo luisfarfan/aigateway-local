@@ -1329,6 +1329,36 @@ GROUP BY project ORDER BY equivalente DESC;
 
 ---
 
+## Mapa de capacidades (prober)
+
+Antes de cualquier tier hay que saber qué sabe hacer cada modelo — **medido, no
+supuesto**. El prober recorre los modelos vivos y prueba cada capacidad con la
+llamada más barata posible:
+
+```bash
+python scripts/probe_models.py                 # chat, tools, visión, embeddings
+python scripts/probe_models.py --websearch     # + búsqueda (1 llamada por modelo)
+python scripts/probe_models.py --images        # + imagen (LENTO: 30-150 s c/u)
+```
+
+Sale `config/capabilities.generated.yaml` con lo que cada modelo hace, su latencia y
+su costo (de `pricing.yaml`), más una **alarma de deriva**: avisa lo que está
+vivo-pero-sin-mapear, para que un modelo nuevo (sonnet-6, gemini-3.9) nunca se cuele
+en silencio.
+
+**Verifica, no adivina.** Una capacidad sólo se marca `true` cuando se comprueba el
+resultado: visión exige acertar el color de una imagen de prueba (un modelo que la
+ignora y responde igual NO tiene visión); tools exige que emita el `tool_call`. Esto
+atrapó falsos positivos reales — modelos de texto que "respondían" a una imagen.
+
+Lo que el prober **no** mide: la **calidad**. "El más listo" o "mejor programador" son
+juicios que salen de los [evals](#comparar-modelos-evals), no de una sonda. El prober
+da el roster y las capacidades; el ranking de calidad es otra capa.
+
+Pensado para correr **programado**: el mapa se regenera, no se mantiene a mano. Un
+modelo nuevo entra solo a las capacidades medibles; su lugar en un tier de calidad
+espera un eval.
+
 ## Comparar modelos (evals)
 
 Convierte "¿este modelo sirve?" en un número que puedes mirar **antes** de cambiar

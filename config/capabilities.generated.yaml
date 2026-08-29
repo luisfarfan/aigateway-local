@@ -1,0 +1,423 @@
+version: 1
+models:
+  bge-m3:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: false
+      embeddings: true
+    chat_latency_s: 0.09
+    errors:
+      chat: 'ollama/v1/chat/completions → 400: "bge-m3:latest" does not support chat'
+  claude-opus-4-6-thinking:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: false
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.87
+    errors: {}
+  claude-sonnet-4-6:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: false
+    chat_latency_s: 2.56
+    errors:
+      vision: 'no acertó el color: ''**Roja**'''
+  codex-auto-review:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.2
+    errors: {}
+  deepseek-coder:6.7b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.03
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:6.7b
+        does not support tools'
+      vision: 'no acertó el color: ''Lo siento, pero como asistent'''
+  deepseek-coder:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 2.44
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:latest
+        does not support tools'
+      vision: 'no acertó el color: ''La imagen especificada no proporciona'''
+  gemini-3-flash:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.84
+    errors: {}
+  gemini-3-flash-agent:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.05
+    errors: {}
+  gemini-3.1-flash-image:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.26
+    errors: {}
+  gemini-3.1-flash-lite:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.64
+    errors: {}
+  gemini-3.1-pro-low:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 6.9
+    errors: {}
+  gemini-3.5-flash-extra-low:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.84
+    errors: {}
+  gemini-3.5-flash-low:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.83
+    errors: {}
+  gemini-3.6-flash-high:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.21
+    errors: {}
+  gemini-3.7-flash-high:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.09
+    errors: {}
+  gemini-pro-agent:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 3.79
+    errors: {}
+  gemma:7b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: false
+      embeddings: false
+    chat_latency_s: 2.38
+    errors:
+      chat: 'ollama/v1/chat/completions → 500: model requires more system memory (5.0
+        GiB) than is available (4.5 GiB)'
+      embeddings: 'ollama/v1/embeddings → 500: model requires more system memory (5.0
+        GiB) than is available (4.4 GiB)'
+  glm-4.7-flash:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: false
+      embeddings: false
+    chat_latency_s: 1.75
+    errors:
+      chat: 'ollama/v1/chat/completions → 500: model requires more system memory (15.7
+        GiB) than is available (4.1 GiB)'
+      embeddings: 'ollama/v1/embeddings → 500: model requires more system memory (15.7
+        GiB) than is available (4.4 GiB)'
+  gpt-5.4-mini:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.44
+    errors: {}
+  gpt-5.5:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.97
+    errors: {}
+  gpt-5.6-luna:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 1.23
+    errors: {}
+  gpt-5.6-terra:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+    chat_latency_s: 2.99
+    errors: {}
+  gpt-image-1.5:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: false
+      embeddings: false
+    chat_latency_s: 0.01
+    errors:
+      chat: '/v1/chat/completions → 503: model gpt-image-1.5 is only supported on
+        /v1/images/generations and /v1/images/edits'
+  gpt-image-2:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: false
+      embeddings: false
+    chat_latency_s: 0.0
+    errors:
+      chat: '/v1/chat/completions → 503: model gpt-image-2 is only supported on /v1/images/generations
+        and /v1/images/edits'
+  gpt-oss-120b-medium:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: false
+      embeddings: false
+    chat_latency_s: 1.56
+    errors:
+      vision: 'no acertó el color: ''Lo siento, pero no puedo ver imágenes. Si me
+        describes breve'''
+  llama3.1:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.4
+    errors:
+      vision: 'no acertó el color: ''No puedo ver la imagen.'''
+  llama3:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.05
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/llama3:latest
+        does not support tools'
+      vision: 'no acertó el color: ''Azul'''
+  mistral:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 6.12
+    errors:
+      vision: 'no acertó el color: '' La imagen es de color verde'''
+  nomic-embed-text:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: false
+      embeddings: true
+    chat_latency_s: 0.01
+    errors:
+      chat: 'ollama/v1/chat/completions → 400: "nomic-embed-text:latest" does not
+        support chat'
+  phi3:mini:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 4.63
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/phi3:mini
+        does not support tools'
+      vision: 'no acertó el color: ''Verde'''
+  qwen2.5-coder:7b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.45
+    errors:
+      vision: 'no acertó el color: ''Amarillo'''
+  qwen2.5-coder:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 6.02
+    errors:
+      vision: 'no acertó el color: ''Roja'''
+  qwen2.5:3b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 4.57
+    errors:
+      vision: 'no acertó el color: ''Imagen'''
+  qwen2.5:7b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.05
+    errors:
+      vision: 'no acertó el color: ''Verde'''
+  qwen2.5:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+    chat_latency_s: 7.48
+    errors:
+      vision: 'no acertó el color: ''Después de analizar la imagen,'''
+  qwen3-embedding:0.6b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: false
+      embeddings: true
+    chat_latency_s: 0.07
+    errors:
+      chat: 'ollama/v1/chat/completions → 400: "qwen3-embedding:0.6b" does not support
+        chat'
