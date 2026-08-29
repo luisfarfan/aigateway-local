@@ -27,6 +27,7 @@ from src.modules.providers.cliproxy.errors import (
     CliproxyTransportError,
 )
 from src.modules.providers.cliproxy.translate import LLMResult, Source
+from src.modules.routing.tiers import load_tiers
 
 
 class FakeCliproxyClient:
@@ -887,3 +888,54 @@ def test_un_tier_no_es_un_modelo():
     table = load_tiers()
     assert table.is_tier("cheap")
     assert not table.is_tier("gemini-3-flash")
+
+
+# ─── Descubrimiento (los sistemas, no sólo los devs) ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_los_tiers_aparecen_en_v1_models():
+    """Un sistema que consulta /v1/models tiene que VER los tiers, no depender
+    de que su desarrollador leyera el README."""
+    from src.modules.routing import tiers as tiers_mod
+
+    fake = tiers_mod.TierTable(
+        policies={"smart": tiers_mod.TierPolicy("smart", require=("chat",), order=("m",))},
+        models={"m": tiers_mod.ModelInfo("m", "x", {"chat": True}, 1.0, 1.0)},
+    )
+    tiers_mod.clear_cache()
+    import src.api.openai_compat.router as router_mod
+
+    router_mod.load_tiers = lambda *a, **k: fake  # type: ignore[assignment]
+    try:
+        response = await call(build_app(FakeCliproxyClient()), "GET", "/v1/models")
+        ids = {m["id"]: m.get("owned_by") for m in response.json()["data"]}
+        assert ids.get("smart") == "proxima-tier"
+    finally:
+        router_mod.load_tiers = load_tiers
+
+
+@pytest.mark.asyncio
+async def test_v1_capabilities_expone_el_mapa_y_los_tiers():
+    """Un consumidor puede preguntarle al gateway de qué es capaz, en vez de
+    leer el README."""
+    from src.modules.routing import tiers as tiers_mod
+
+    fake = tiers_mod.TierTable(
+        policies={"cheap": tiers_mod.TierPolicy("cheap", require=("chat",), rank_by="cost_asc")},
+        models={
+            "barato": tiers_mod.ModelInfo(
+                "barato", "google", {"chat": True, "vision": True}, 1.0, 0.4
+            )
+        },
+    )
+    import src.api.openai_compat.router as router_mod
+
+    router_mod.load_tiers = lambda *a, **k: fake  # type: ignore[assignment]
+    try:
+        response = await call(build_app(FakeCliproxyClient()), "GET", "/v1/capabilities")
+        body = response.json()
+        assert set(body["models"]["barato"]["capabilities"]) == {"chat", "vision"}
+        assert body["tiers"]["cheap"]["chat"] == ["barato"]
+    finally:
+        router_mod.load_tiers = load_tiers

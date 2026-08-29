@@ -18,9 +18,13 @@ un costo inventado.
 
 from proxima_llm.client import Gateway, SyncGateway
 from proxima_llm.errors import ProximaError
+from proxima_llm.tiers import CHEAP, FAST, SMART
 from proxima_llm.types import Completion, Embeddings, Image, Source
 
 __all__ = [
+    "CHEAP",
+    "FAST",
+    "SMART",
     "Completion",
     "Embeddings",
     "Gateway",

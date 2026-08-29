@@ -212,7 +212,42 @@ async def list_models(request: Request) -> Any:
             # cloud: se devuelve lo que hay y se registra el hueco.
             log.warning("backends.local_models_failed", error=exc.message)
 
+    # Los tiers también son valores válidos de `model`. Aparecen en el endpoint
+    # estándar de descubrimiento para que un sistema los ENCUENTRE, no sólo su
+    # desarrollador leyendo el README. `owned_by: proxima-tier` los distingue.
+    for name in load_tiers().policies:
+        data.append({"id": name, "object": "model", "owned_by": "proxima-tier"})
+
     return {"object": "list", "data": data}
+
+
+@router.get("/v1/capabilities", summary="Qué sabe hacer cada modelo, y los tiers")
+async def capabilities(request: Request) -> Any:
+    """Mapa de capacidades + tiers, para que un sistema elija por programa.
+
+    `/v1/models` dice QUÉ modelos hay; esto dice qué sabe hacer cada uno
+    (chat/tools/vision/websearch/image/embeddings, medido por el prober) y a qué
+    resuelve cada tier ahora mismo. Así un consumidor no tiene que leer el README
+    para descubrir de qué es capaz este gateway.
+    """
+    tiers = load_tiers()
+    return {
+        "object": "capabilities",
+        "models": {
+            mid: {
+                "family": info.family,
+                "capabilities": [c for c, ok in info.capabilities.items() if ok],
+            }
+            for mid, info in tiers.models.items()
+        },
+        "tiers": {
+            name: {
+                "chat": tiers.resolve(name, route="chat"),
+                "unclassified": tiers.unclassified(name),
+            }
+            for name in tiers.policies
+        },
+    }
 
 
 def _json_schema_of(response_format: dict[str, Any] | None) -> tuple[dict[str, Any], str] | None:

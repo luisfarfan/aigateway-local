@@ -77,8 +77,17 @@ class Gateway(_Base):
         await self.aclose()
 
     async def models(self) -> list[dict[str, Any]]:
-        """Inventario. Ojo: lista lo configurado, no lo que responde ahora."""
+        """Inventario. Ojo: lista lo configurado, no lo que responde ahora.
+
+        Incluye los tiers (`owned_by: proxima-tier`) además de los modelos
+        concretos: son valores válidos de `model`.
+        """
         return (await self._request("GET", "/v1/models"))["data"]
+
+    async def capabilities(self) -> dict[str, Any]:
+        """Qué sabe hacer cada modelo y a qué resuelve cada tier, para elegir por
+        programa sin leer el README."""
+        return await self._request("GET", "/v1/capabilities")
 
     async def chat(
         self,
@@ -206,7 +215,12 @@ class SyncGateway(_Base):
         self.close()
 
     def models(self) -> list[dict[str, Any]]:
+        """Inventario, incluidos los tiers (`owned_by: proxima-tier`)."""
         return self._request("GET", "/v1/models")["data"]
+
+    def capabilities(self) -> dict[str, Any]:
+        """Qué sabe hacer cada modelo y a qué resuelve cada tier."""
+        return self._request("GET", "/v1/capabilities")
 
     def chat(
         self,

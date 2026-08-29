@@ -580,7 +580,7 @@ de esta máquina.
   - [Watchdog](#watchdog) · [Precios](#precios) · [Variables](#variables-de-entorno)
 - [SDK de Python](#sdk-de-python)
 - [Observabilidad](#observabilidad)
-- [Routing por intención (tiers)](#routing-por-intención-tiers) · [Mapa de capacidades (prober)](#mapa-de-capacidades-prober)
+- [Routing por intención (tiers)](#routing-por-intención-tiers) · [Descubrir el gateway](#descubrir-qué-ofrece-el-gateway-sin-leer-esto) · [Mapa de capacidades (prober)](#mapa-de-capacidades-prober)
 - [Comparar modelos](#comparar-modelos-evals)
 - [Clientes agénticos](#clientes-agénticos) · [Servicio nativo](#servicio-nativo-que-funcione-siempre)
 - [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
@@ -626,7 +626,8 @@ son dos puertas.
 POST /v1/chat/completions     chat, búsqueda web, visión y salida estructurada
 POST /v1/images/generations   generación de imagen
 POST /v1/embeddings           vectores para búsqueda semántica y RAG
-GET  /v1/models               inventario (cloud + local)
+GET  /v1/models               inventario (cloud + local + tiers)
+GET  /v1/capabilities         qué sabe hacer cada modelo + a qué resuelve cada tier
 ```
 
 ### Autenticación
@@ -1368,6 +1369,44 @@ Lo honesto: `cheap`/`fast` salen de medición pura y no envejecen. `smart` (y un
 `coder`) dependen de un juicio de **calidad** que una sonda no da — se curan a mano o con
 [evals](#comparar-modelos-evals), y el prober sólo avisa cuando aparece un modelo sin
 clasificar.
+
+## Descubrir qué ofrece el gateway (sin leer esto)
+
+El README es para quien monta el sistema. Un **sistema que consume** no lo lee — pregunta
+por HTTP. Dos endpoints para eso:
+
+```bash
+GET /v1/models        # incluye los tiers (owned_by: "proxima-tier") junto a los modelos
+GET /v1/capabilities  # qué sabe hacer cada modelo + a qué resuelve cada tier ahora
+```
+
+`/v1/capabilities` devuelve el mapa vivo:
+
+```json
+{
+  "models": {
+    "gemini-3-flash": {"family": "google",
+      "capabilities": ["chat", "tools", "vision", "websearch", "image"]}
+  },
+  "tiers": {
+    "smart": {"chat": ["claude-opus-4-6-thinking", "gpt-5.5", ...], "unclassified": []}
+  }
+}
+```
+
+Así un consumidor elige por programa —"dame uno con visión y websearch"— sin cablear
+nombres ni depender de que alguien leyó el README. Y como el prober regenera el mapa,
+lo que devuelve está siempre al día.
+
+En el SDK:
+
+```python
+from proxima_llm import SyncGateway, SMART, CHEAP, FAST
+
+gw.chat("...", model=SMART)      # constante, un typo es error de import y no un 502
+caps = gw.capabilities()         # el mapa, para elegir por capacidad
+gw.models()                      # incluye los tiers
+```
 
 ## Mapa de capacidades (prober)
 
