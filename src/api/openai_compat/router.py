@@ -38,6 +38,7 @@ from src.modules.routing import errors as routing_errors
 from src.modules.routing.breaker import CircuitBreaker
 from src.modules.routing.config import RoutingTable, load_routing
 from src.modules.routing.executor import NoCandidatesError, RouteResult, run_with_fallback
+from src.modules.routing.tiers import load_tiers
 from src.modules.structured.guard import InvalidStructuredOutput, call_with_guard
 
 log = structlog.get_logger(__name__)
@@ -245,6 +246,28 @@ def _routing(request: Request) -> tuple[RoutingTable, CircuitBreaker]:
         # modelo más débil pese a la cabecera.
         table = replace(table, fallback_on=frozenset(), single_candidate=True)
     return table, CircuitBreaker(table.breaker)
+
+
+def _candidates(request: Request, table: RoutingTable, route: str, model: str | None) -> list[str]:
+    """Cadena de candidatos para esta petición, ya ordenada.
+
+    Si el cliente pidió un tier (`cheap`/`fast`/`smart`), la cadena sale de la
+    política sobre el mapa de capacidades. Si el tier no tiene modelos para esta
+    ruta —p. ej. `cheap` en websearch cuando el prober no sondeó websearch—, se
+    cae a la cadena normal de la ruta en vez de fallar: la intención del cliente
+    se respeta hasta donde el mapa alcanza.
+
+    `X-Proxima-No-Fallback` recorta a 1 igual que en el resto.
+    """
+    tiers = load_tiers()
+    if model and tiers.is_tier(model):
+        chain = tiers.resolve(model, route=route)
+        if chain:
+            single = bool(request.headers.get("X-Proxima-No-Fallback"))
+            return chain[:1] if single else chain
+        log.info("tier.empty_fallback", tier=model, route=route)
+        return table.candidates(route)
+    return table.candidates(route, _requested_model(request, table, route, model))
 
 
 def _requested_model(
@@ -538,8 +561,7 @@ async def _stream_completions(
     """
     registry = _backends(request)
     table, breaker = _routing(request)
-    requested = _requested_model(request, table, "chat", body.model)
-    candidates = table.candidates("chat", requested)
+    candidates = _candidates(request, table, "chat", body.model)
     tools = _function_tools(body.tools)
 
     # El `observe` entra en ESTE stack, no en el del endpoint: si se cerrara al
@@ -670,12 +692,12 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
     structured = _json_schema_of(body.response_format)
     websearch = _wants_websearch(body.tools)
     route = "structured" if structured else ("websearch" if websearch else "chat")
-    requested = _requested_model(request, table, route, body.model)
+    cands = _candidates(request, table, route, body.model)
 
     obs = Observation(
         project=_project_of(request),
         route=route,
-        requested_model=requested or (table.candidates(route) or ["?"])[0],
+        requested_model=body.model or (cands or ["?"])[0],
         client_id=_client_id_of(request),
     )
 
@@ -712,7 +734,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
 
         try:
             routed = await run_with_fallback(
-                call, route=route, table=table, breaker=breaker, requested_model=requested
+                call, route=route, table=table, breaker=breaker, candidates=cands
             )
         except NoCandidatesError as exc:
             obs.failed(
@@ -782,11 +804,11 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
     """
     registry = _backends(request)
     table, breaker = _routing(request)
-    requested = _requested_model(request, table, "image", body.model)
+    cands = _candidates(request, table, "image", body.model)
     obs = Observation(
         project=_project_of(request),
         route="image",
-        requested_model=requested or (table.candidates("image") or ["?"])[0],
+        requested_model=body.model or (cands or ["?"])[0],
         client_id=_client_id_of(request),
     )
 
@@ -802,7 +824,7 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
 
         try:
             routed = await run_with_fallback(
-                attempt, route="image", table=table, breaker=breaker, requested_model=requested
+                attempt, route="image", table=table, breaker=breaker, candidates=cands
             )
         except NoCandidatesError as exc:
             obs.failed(
@@ -850,13 +872,13 @@ async def embeddings(request: Request, body: EmbeddingsRequest) -> Any:
     """
     registry = _backends(request)
     table, breaker = _routing(request)
-    requested = _requested_model(request, table, "embeddings", body.model)
+    cands = _candidates(request, table, "embeddings", body.model)
     texts = [body.input] if isinstance(body.input, str) else list(body.input)
 
     obs = Observation(
         project=_project_of(request),
         route="embeddings",
-        requested_model=requested or (table.candidates("embeddings") or ["?"])[0],
+        requested_model=body.model or (cands or ["?"])[0],
         client_id=_client_id_of(request),
     )
 
@@ -891,7 +913,7 @@ async def embeddings(request: Request, body: EmbeddingsRequest) -> Any:
                 route="embeddings",
                 table=table,
                 breaker=breaker,
-                requested_model=requested,
+                candidates=cands,
             )
         except NoCandidatesError as exc:
             obs.failed(

@@ -1329,6 +1329,45 @@ GROUP BY project ORDER BY equivalente DESC;
 
 ---
 
+## Routing por intención (tiers)
+
+Pide un modelo por **lo que quieres**, no por su nombre:
+
+```json
+{"model": "smart",  "messages": [...]}   // el más capaz
+{"model": "cheap",  "messages": [...]}   // el más barato
+{"model": "fast",   "messages": [...]}   // el de menor latencia
+```
+
+Un tier **no es una lista de nombres — es una política** sobre el
+[mapa de capacidades](#mapa-de-capacidades-prober), en `config/tiers.yaml`. Por eso
+aguanta el cambio de modelos: sale opus-7, entra solo en el próximo barrido del
+prober; una lista fija se pudriría.
+
+| Tier | Cómo se ordena | ¿Se auto-actualiza? |
+|---|---|---|
+| `cheap` | por costo medido (`pricing.yaml`) | **sí, solo** |
+| `fast` | por latencia medida (prober) | **sí, solo** |
+| `smart` | orden **curado** (juicio/evals) | **no** — un modelo nuevo entra como candidato, su lugar espera un eval |
+
+**Preserva capacidad en el fallback** — que es el problema que motivó todo esto. Si
+pides `smart` y el primero (opus) tiene el circuito abierto, cae al **siguiente
+smart** (gpt-5.5), no a un modelo rápido y débil. Verificado:
+
+```
+model=smart, opus caído → respondió gpt-5.5, fell_back_from=claude-opus-4-6-thinking
+model=smart + X-Proxima-No-Fallback → 503 (falla en vez de degradar)
+```
+
+La ruta añade su capacidad: `cheap` en búsqueda web = barato **Y** con websearch. Si el
+mapa no cubre esa capacidad (no se sondeó), el tier cae a la cadena normal de la ruta en
+vez de fallar — la intención se respeta hasta donde el mapa alcanza.
+
+Lo honesto: `cheap`/`fast` salen de medición pura y no envejecen. `smart` (y un futuro
+`coder`) dependen de un juicio de **calidad** que una sonda no da — se curan a mano o con
+[evals](#comparar-modelos-evals), y el prober sólo avisa cuando aparece un modelo sin
+clasificar.
+
 ## Mapa de capacidades (prober)
 
 Antes de cualquier tier hay que saber qué sabe hacer cada modelo — **medido, no

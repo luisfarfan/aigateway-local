@@ -847,3 +847,43 @@ def test_no_fallback_recorta_la_cadena_a_un_candidato():
     nf = replace(table, single_candidate=True)
     assert nf.candidates("chat", "claude-sonnet-4-6") == ["claude-sonnet-4-6"]
     assert len(table.candidates("chat", "claude-sonnet-4-6")) > 1
+
+
+# ─── Tiers (routing por intención) ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_pedir_un_tier_resuelve_a_un_modelo_real(monkeypatch):
+    """`model: "cheap"` no es un modelo — es una intención. El gateway lo
+    resuelve contra el mapa de capacidades."""
+    from src.modules.routing import tiers as tiers_mod
+
+    fake_table = tiers_mod.TierTable(
+        policies={"cheap": tiers_mod.TierPolicy("cheap", require=("chat",), rank_by="cost_asc")},
+        models={
+            "barato": tiers_mod.ModelInfo("barato", "google", {"chat": True}, 1.0, 0.4),
+            "caro": tiers_mod.ModelInfo("caro", "openai", {"chat": True}, 1.0, 11.0),
+        },
+    )
+    tiers_mod.load_tiers.cache_clear()
+    monkeypatch.setattr(tiers_mod, "load_tiers", lambda *a, **k: fake_table)
+
+    fake = FakeCliproxyClient()
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={"model": "cheap", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert response.status_code == 200
+    assert fake.calls == ["chat"]  # resolvió y sirvió, no trató "cheap" como modelo
+
+
+def test_un_tier_no_es_un_modelo():
+    """`is_tier` separa la intención del nombre concreto."""
+    from src.modules.routing.tiers import load_tiers
+
+    load_tiers.cache_clear()
+    table = load_tiers()
+    assert table.is_tier("cheap")
+    assert not table.is_tier("gemini-3-flash")

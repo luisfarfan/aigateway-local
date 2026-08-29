@@ -1,0 +1,45 @@
+# Tiers: pedir un modelo por INTENCIÓN, no por nombre.
+#
+# Un cliente manda `model: "cheap"` y el gateway resuelve la cadena contra el
+# mapa de capacidades (config/capabilities.generated.yaml) y los precios
+# (config/pricing.yaml). Nada de nombres cableados: sale un modelo nuevo más
+# barato, entra solo en el próximo barrido del prober. La política no envejece;
+# una lista sí.
+#
+# `require`  → capacidades que el modelo debe tener (medidas por el prober).
+#              La ruta añade la suya: `cheap` en websearch = barato Y con
+#              websearch.
+# `rank_by`  → cómo se ordena la cadena:
+#                cost_asc     más barato primero  (usa pricing.yaml)
+#                latency_asc  más rápido primero  (medido por el prober)
+# `order`    → orden explícito y curado. Para lo que NO se puede medir con una
+#              sonda: la CALIDAD. "smart" es un juicio (evals o humano), así que
+#              va a mano y se marca como tal. Los ids que ya no existan se
+#              ignoran; los que falten se avisan por la alarma de deriva.
+# `exclude`  → familias o ids fuera de este tier.
+
+version: 1
+
+tiers:
+  # Medibles: se derivan solos del mapa. No envejecen.
+  cheap:
+    require: [chat]
+    rank_by: cost_asc
+    # local es gratis pero lento; se deja como cola, no como cabeza de "cheap".
+    exclude_family: [local]
+
+  fast:
+    require: [chat]
+    rank_by: latency_asc
+    exclude_family: [local]   # los locales rondan 5-17 s; no son "fast"
+
+  # Calidad: curado. Orden por juicio, respaldable con evals. Se revisa cuando
+  # el prober avisa un modelo nuevo.
+  smart:
+    require: [chat]
+    order:
+      - claude-opus-4-6-thinking
+      - gpt-5.5
+      - gemini-3.7-flash-high
+      - claude-sonnet-4-6
+      - gpt-5.4-mini

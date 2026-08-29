@@ -74,9 +74,14 @@ async def run_with_fallback[T](
     table: RoutingTable,
     breaker: CircuitBreaker,
     requested_model: str | None = None,
+    candidates: list[str] | None = None,
 ) -> RouteResult[T]:
-    """Prueba `call(model)` sobre la cadena hasta que uno responda."""
-    candidates = table.candidates(route, requested_model)
+    """Prueba `call(model)` sobre la cadena hasta que uno responda.
+
+    `candidates` permite pasar una cadena ya calculada —la de un tier, por
+    ejemplo—. Si no se da, se deriva de la tabla como siempre.
+    """
+    candidates = candidates if candidates is not None else table.candidates(route, requested_model)
     if not candidates:
         raise NoCandidatesError(f"La ruta {route!r} no tiene modelos configurados")
 
