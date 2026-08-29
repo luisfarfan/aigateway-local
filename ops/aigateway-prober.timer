@@ -1,0 +1,13 @@
+# Corre el prober cada 6 horas. El roster de modelos no cambia por minuto, así
+# que 4 barridos al día alcanzan para detectar un modelo nuevo el mismo día, sin
+# gastar cuota de gusto.
+[Unit]
+Description=Proxima Gateway — prober cada 6 h
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

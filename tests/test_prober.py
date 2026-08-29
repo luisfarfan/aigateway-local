@@ -116,3 +116,49 @@ def test_el_mapa_serializado_es_estable_para_diff():
     ]
     out = to_serializable(cards)
     assert list(out["models"]) == ["alpha", "zeta"]
+
+
+def test_un_barrido_barato_no_borra_lo_que_no_probó():
+    """Bug encontrado con el prober programado: corre sin --images y sobrescribía
+    el mapa, borrando la capacidad de imagen que fijó un barrido completo. Ahora
+    lo no probado se hereda del mapa anterior."""
+    from src.modules.routing.prober import carry_forward
+
+    # barrido barato: NO probó image ni websearch
+    card = ModelCard(
+        id="gemini-3-flash",
+        owned_by="google",
+        family="google",
+        hosted="cloud",
+        capabilities={"chat": True, "tools": True, "vision": True, "embeddings": False},
+    )
+    previous = {
+        "gemini-3-flash": {
+            "capabilities": {"chat": True, "image": True, "websearch": True},
+        }
+    }
+    carry_forward([card], previous, probed=frozenset({"chat", "tools", "vision", "embeddings"}))
+
+    assert card.capabilities["image"] is True  # heredado, no borrado
+    assert card.capabilities["websearch"] is True  # heredado
+    assert card.capabilities["chat"] is True  # el de este barrido
+
+
+def test_lo_probado_este_barrido_manda_sobre_lo_heredado():
+    """Si el barrido SÍ probó una capacidad, su resultado gana — no se pisa con
+    el viejo."""
+    from src.modules.routing.prober import carry_forward
+
+    card = ModelCard(
+        id="m",
+        owned_by="x",
+        family="x",
+        hosted="cloud",
+        capabilities={"chat": True, "image": False},  # este barrido probó image=false
+    )
+    previous = {"m": {"capabilities": {"image": True}}}  # antes era true
+    carry_forward(
+        [card], previous, probed=frozenset({"chat", "vision", "tools", "embeddings", "image"})
+    )
+
+    assert card.capabilities["image"] is False  # el nuevo manda; no se heredó el viejo

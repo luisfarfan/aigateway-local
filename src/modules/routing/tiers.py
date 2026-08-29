@@ -21,7 +21,6 @@ se intersecta con la del tier: `cheap` en websearch = barato Y con websearch.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 
 import structlog
@@ -122,17 +121,36 @@ class TierTable:
         return [mid for mid in policy.order if mid not in self.models]
 
 
-@lru_cache(maxsize=1)
-def load_tiers(tiers_path: str | None = None, map_path: str | None = None) -> TierTable:
-    """Carga políticas + mapa + precios, cacheado. Sin mapa, no hay tiers.
+# Cache por mtime, NO por proceso: el prober regenera el mapa en un job aparte,
+# y el gateway tiene que ver el mapa nuevo sin reiniciar. Se relee sólo cuando el
+# archivo cambió; en el caso normal (sin cambios) es una llamada a stat, barato.
+_CACHE: dict[str, object] = {"table": None, "stamp": None}
 
-    El mapa lo produce el prober y se regenera; para que un re-barrido surta
-    efecto hay que limpiar este cache (o reiniciar). Se prefiere eso a releer y
-    rankear el mapa en cada request.
-    """
-    policies = _load_policies(Path(tiers_path) if tiers_path else DEFAULT_TIERS_PATH)
-    models = _load_models(Path(map_path) if map_path else DEFAULT_MAP_PATH)
-    return TierTable(policies=policies, models=models)
+
+def load_tiers(tiers_path: str | None = None, map_path: str | None = None) -> TierTable:
+    """Políticas + mapa + precios. Se recarga solo cuando el mapa o las políticas
+    cambian en disco — así un re-barrido del prober surte efecto sin reiniciar."""
+    tp = Path(tiers_path) if tiers_path else DEFAULT_TIERS_PATH
+    mp = Path(map_path) if map_path else DEFAULT_MAP_PATH
+    stamp = (_mtime(tp), _mtime(mp))
+    if _CACHE["table"] is None or _CACHE["stamp"] != stamp:
+        _CACHE["table"] = TierTable(policies=_load_policies(tp), models=_load_models(mp))
+        _CACHE["stamp"] = stamp
+        log.info("tiers.loaded", models=len(_CACHE["table"].models))  # type: ignore[union-attr]
+    return _CACHE["table"]  # type: ignore[return-value]
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def clear_cache() -> None:
+    """Fuerza la recarga en el próximo `load_tiers`. Para tests."""
+    _CACHE["table"] = None
+    _CACHE["stamp"] = None
 
 
 def _load_policies(path: Path) -> dict[str, TierPolicy]:

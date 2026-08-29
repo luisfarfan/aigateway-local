@@ -30,7 +30,13 @@ from src.modules.backends.ollama import OllamaBackend  # noqa: E402
 from src.modules.backends.registry import BackendRegistry  # noqa: E402
 from src.modules.observability.pricing import load_pricing  # noqa: E402
 from src.modules.providers.cliproxy.client import CliproxyClient  # noqa: E402
-from src.modules.routing.prober import detect_drift, probe_all, to_serializable  # noqa: E402
+from src.modules.routing.prober import (  # noqa: E402
+    ALWAYS_PROBED,
+    carry_forward,
+    detect_drift,
+    probe_all,
+    to_serializable,
+)
 
 
 def _cost_note(model: str, family: str) -> str:
@@ -68,7 +74,16 @@ async def main(argv: list[str]) -> int:
         expensive.add("image")
 
     print(f"Sondeando modelos vivos (caras: {sorted(expensive) or 'ninguna'})...\n")
+    out = REPO / args.out
+    previous = {}
+    if out.exists():
+        previous = (yaml.safe_load(out.read_text()) or {}).get("models") or {}
+
     cards = await probe_all(registry, include_expensive=frozenset(expensive))
+
+    # Lo no sondeado hoy se hereda del mapa anterior: un barrido barato no debe
+    # borrar la capacidad de imagen que fijó uno completo.
+    carry_forward(cards, previous, probed=ALWAYS_PROBED | frozenset(expensive))
 
     for c in sorted(cards, key=lambda c: (c.hosted, c.id)):
         cost = _cost_note(c.id, c.family)
@@ -76,7 +91,6 @@ async def main(argv: list[str]) -> int:
         print(f"  [{c.hosted:5}] {c.id:30} {lat:>7}  {cost:24}  → {', '.join(c.can) or '(nada)'}")
 
     payload = to_serializable(cards)
-    out = REPO / args.out
     out.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
     print(f"\nMapa escrito en {out}")
 

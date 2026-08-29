@@ -249,6 +249,32 @@ def _backends_of(registry: BackendRegistry) -> list[Backend]:
     return backends
 
 
+ALWAYS_PROBED = frozenset({"chat", "tools", "vision", "embeddings"})
+
+
+def carry_forward(
+    cards: list[ModelCard],
+    previous: dict[str, dict[str, Any]],
+    *,
+    probed: frozenset[str],
+) -> None:
+    """Hereda del mapa anterior las capacidades que ESTE barrido no probó.
+
+    Sin esto, un barrido barato (sin `--images`) sobrescribe el mapa y borra la
+    capacidad de imagen que capturó un barrido completo: un modelo que genera
+    imágenes aparecería como que no, sólo porque hoy no se probó eso. La
+    capacidad no probada se arrastra tal cual del último dato conocido.
+    """
+    unprobed = EXPENSIVE - probed
+    if not unprobed:
+        return
+    for card in cards:
+        prev = (previous.get(card.id) or {}).get("capabilities") or {}
+        for cap in unprobed:
+            if cap in prev:
+                card.capabilities[cap] = prev[cap]
+
+
 def detect_drift(live_ids: set[str], mapped_ids: set[str]) -> dict[str, list[str]]:
     """Alarma de deriva: qué está vivo sin mapear, y qué se mapeó sin estar vivo.
 

@@ -1,0 +1,12 @@
+# Regenera el mapa de capacidades (config/capabilities.generated.yaml).
+# Lo dispara aigateway-prober.timer; el gateway ve el mapa nuevo sin reiniciar.
+[Unit]
+Description=Proxima Gateway — barrido del prober de capacidades
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=%h/projects/aigateway-local/ops/probe-models.sh
+# Un barrido puede tardar (locales lentos + websearch); no lo mates pronto.
+TimeoutStartSec=1200

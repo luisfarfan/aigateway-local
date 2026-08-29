@@ -865,7 +865,7 @@ async def test_pedir_un_tier_resuelve_a_un_modelo_real(monkeypatch):
             "caro": tiers_mod.ModelInfo("caro", "openai", {"chat": True}, 1.0, 11.0),
         },
     )
-    tiers_mod.load_tiers.cache_clear()
+    tiers_mod.clear_cache()
     monkeypatch.setattr(tiers_mod, "load_tiers", lambda *a, **k: fake_table)
 
     fake = FakeCliproxyClient()
@@ -881,9 +881,9 @@ async def test_pedir_un_tier_resuelve_a_un_modelo_real(monkeypatch):
 
 def test_un_tier_no_es_un_modelo():
     """`is_tier` separa la intención del nombre concreto."""
-    from src.modules.routing.tiers import load_tiers
+    from src.modules.routing.tiers import clear_cache, load_tiers
 
-    load_tiers.cache_clear()
+    clear_cache()
     table = load_tiers()
     assert table.is_tier("cheap")
     assert not table.is_tier("gemini-3-flash")
