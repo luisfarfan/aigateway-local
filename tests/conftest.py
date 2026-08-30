@@ -33,6 +33,25 @@ from src.modules.providers.registry import ProviderRegistry
 from src.modules.providers.stub.provider import StubProvider
 
 
+@pytest.fixture(autouse=True)
+def _breaker_sin_redis_real(monkeypatch):
+    """Aísla el circuit breaker del Redis real.
+
+    El breaker usa `get_redis()` directo (no el fake de pub/sub del test client),
+    así que sin esto los tests del router leen el estado de circuitos del Redis
+    en VIVO: un circuito que el watchdog abrió en producción rompía tests de
+    cache o de ruteo sin que nada en el test lo explicara. Se hace fallar la
+    conexión, que es como el breaker degrada de verdad — is_open → False, deja
+    pasar. Los tests que prueban la lógica del breaker usan su propio doble.
+    """
+    from src.modules.routing import breaker as breaker_mod
+
+    def _no_redis():
+        raise ConnectionError("redis aislado en tests")
+
+    monkeypatch.setattr(breaker_mod, "get_redis", _no_redis)
+
+
 # ─── Database ─────────────────────────────────────────────────────────────────
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

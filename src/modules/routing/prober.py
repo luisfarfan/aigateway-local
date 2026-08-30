@@ -138,6 +138,7 @@ async def probe_model(
     owned_by: str,
     hosted: str,
     include_expensive: frozenset[str] = frozenset(),
+    previous_card: dict[str, Any] | None = None,
 ) -> ModelCard:
     """Prueba un modelo capacidad por capacidad. `model` ya sin prefijo de backend."""
     from src.modules.providers.cliproxy.families import Family, family_from_owned_by
@@ -192,10 +193,32 @@ async def probe_model(
             card.errors["websearch"] = ws_err
 
     if "image" in include_expensive:
-        img_ok, _, img_err = await _timed_ok(backend.image("un punto rojo", model=model))
-        card.capabilities["image"] = img_ok
-        if img_err and not img_ok:
-            card.errors["image"] = img_err
+        # No basta con que la llamada no lance: un modelo de sólo-chat responde
+        # texto sin imagen y pasaría como generador (el mismo falso positivo que
+        # la visión). Se exige que VUELVAN bytes de imagen.
+        #
+        # Y se distingue "no generó" de "no se pudo probar": la generación es
+        # lenta y se rate-limitea (429/cooldown). Un cooldown NO significa que el
+        # modelo no sepa generar, así que en ese caso se conserva la etiqueta
+        # previa en vez de marcarlo false y sacar al buen modelo de los tiers.
+        prev_image = (previous_card or {}).get("capabilities", {}).get("image")
+        try:
+            r = await backend.image("un cuadrado rojo simple", model=model)
+            card.capabilities["image"] = bool(r.images)
+            if not r.images:
+                card.errors["image"] = "respondió sin imagen"
+        except BackendCapabilityError:
+            card.capabilities["image"] = False
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc).lower()
+            transient = any(w in msg for w in ("cooldown", "exhausted", "429", "timeout", "rate"))
+            if transient and prev_image is not None:
+                # No se pudo comprobar por carga; se respeta lo último conocido.
+                card.capabilities["image"] = prev_image
+                card.errors["image"] = f"no probado ({str(exc)[:80]}); se conserva previo"
+            else:
+                card.capabilities["image"] = False
+                card.errors["image"] = str(exc)[:150]
 
     log.info("prober.model", model=model, hosted=hosted, can=card.can)
     return card
@@ -205,8 +228,14 @@ async def probe_all(
     registry: BackendRegistry,
     *,
     include_expensive: frozenset[str] = frozenset(),
+    previous: dict[str, dict[str, Any]] | None = None,
 ) -> list[ModelCard]:
-    """Prueba todos los modelos vivos de todos los backends."""
+    """Prueba todos los modelos vivos de todos los backends.
+
+    `previous` es el mapa anterior: se pasa a cada sonda para conservar lo último
+    conocido cuando una capacidad no se pudo comprobar (imagen en cooldown).
+    """
+    previous = previous or {}
     cards: list[ModelCard] = []
     seen: set[str] = set()
 
@@ -231,6 +260,7 @@ async def probe_all(
                     owned_by=entry.get("owned_by", ""),
                     hosted=hosted,
                     include_expensive=include_expensive,
+                    previous_card=previous.get(bare) or previous.get(full_id),
                 )
             )
     return cards

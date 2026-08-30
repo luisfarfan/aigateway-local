@@ -79,7 +79,7 @@ async def main(argv: list[str]) -> int:
     if out.exists():
         previous = (yaml.safe_load(out.read_text()) or {}).get("models") or {}
 
-    cards = await probe_all(registry, include_expensive=frozenset(expensive))
+    cards = await probe_all(registry, include_expensive=frozenset(expensive), previous=previous)
 
     # Lo no sondeado hoy se hereda del mapa anterior: un barrido barato no debe
     # borrar la capacidad de imagen que fijó uno completo.

@@ -829,6 +829,19 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
         return payload
 
 
+def _image_item(data_uri: str, response_format: str) -> dict[str, str]:
+    """Un item de imagen en la forma que pidió el cliente.
+
+    Internamente la imagen viaja como data-URI (`data:image/png;base64,XXXX`).
+    Para `b64_json` se devuelve el base64 pelado —sin la cabecera `data:...,`—,
+    que es lo que espera el contrato de OpenAI; para `url`, el data-URI entero.
+    """
+    if response_format == "url":
+        return {"url": data_uri}
+    _, _, b64 = data_uri.partition(",")
+    return {"b64_json": b64 or data_uri}
+
+
 @router.post("/v1/images/generations", summary="Generación de imagen")
 async def images_generations(request: Request, body: ImageRequest) -> Any:
     """Devuelve siempre data URIs en `data[].url`.
@@ -885,10 +898,15 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
         obs.image_count = len(result.images)
         obs.succeeded(model=result.model)
 
+        # Contrato OpenAI: con response_format="b64_json" la imagen va en
+        # `data[].b64_json` (base64 pelado, sin cabecera data:); con "url", en
+        # `data[].url`. El default de OpenAI es b64_json. Antes se devolvía
+        # siempre `url` con un data-URI, ignorando el campo — un cliente que
+        # pedía b64_json recibía otra cosa.
         return {
             "created": 0,
             "model": result.model,
-            "data": [{"url": url} for url in result.images],
+            "data": [_image_item(url, body.response_format) for url in result.images],
             "usage": {
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,

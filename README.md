@@ -815,9 +815,12 @@ curl -X POST http://192.168.1.12:8000/v1/images/generations \
   -d '{"prompt": "un cubo rojo sobre fondo blanco", "size": "1024x1024"}'
 ```
 
-Respuesta, siempre normalizada a data URI:
+Respuesta, en la forma que pidas con `response_format` (default OpenAI: `b64_json`):
 
 ```json
+// response_format: "b64_json" (default) → base64 pelado
+{"model": "gemini-3.1-flash-image", "data": [{"b64_json": "/9j/4AAQ..."}]}
+// response_format: "url" → data-URI
 {"model": "gemini-3.1-flash-image", "data": [{"url": "data:image/jpeg;base64,/9j/4AAQ..."}]}
 ```
 
@@ -1429,6 +1432,13 @@ en silencio.
 resultado: visión exige acertar el color de una imagen de prueba (un modelo que la
 ignora y responde igual NO tiene visión); tools exige que emita el `tool_call`. Esto
 atrapó falsos positivos reales — modelos de texto que "respondían" a una imagen.
+
+La sonda de **imagen** es la menos fiable: la generación es lenta y se rate-limitea
+(429/cooldown). Exige que vuelvan bytes de imagen —no sólo un 200— y, si no se puede
+probar por cooldown, **conserva la etiqueta previa** en vez de marcar el modelo como
+incapaz. Aun así, los tiers de imagen no dependen de que la sonda acierte: si ningún
+modelo figura como generador, el tier cae a la cadena de imagen de `routing.yaml`
+(`gemini-3.1-flash-image`), que es la fuente de verdad para esa ruta.
 
 Lo que el prober **no** mide: la **calidad**. "El más listo" o "mejor programador" son
 juicios que salen de los [evals](#comparar-modelos-evals), no de una sonda. El prober

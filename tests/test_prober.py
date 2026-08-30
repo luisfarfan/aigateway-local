@@ -162,3 +162,58 @@ def test_lo_probado_este_barrido_manda_sobre_lo_heredado():
     )
 
     assert card.capabilities["image"] is False  # el nuevo manda; no se heredó el viejo
+
+
+@pytest.mark.asyncio
+async def test_image_solo_true_si_vuelven_bytes():
+    """El bug reportado desde intel-v2: flash-lite (sólo chat) salía image=true
+    porque la llamada no lanzaba, aunque respondiera texto sin imagen. Ahora se
+    exige que VUELVA una imagen."""
+    from src.modules.providers.cliproxy.translate import LLMResult
+
+    class ImgBackend(FakeBackend):
+        def __init__(self, images):
+            super().__init__()
+            self._images = images
+
+        async def image(self, prompt, *, model, size=None, quality=None):
+            return LLMResult(text="", model=model, images=self._images)
+
+    genera = await probe_model(
+        ImgBackend(["data:image/png;base64,AAA"]),
+        "flash-image",
+        owned_by="google",
+        hosted="cloud",
+        include_expensive=frozenset({"image"}),
+    )
+    assert genera.capabilities["image"] is True
+
+    no_genera = await probe_model(
+        ImgBackend([]),
+        "flash-lite",
+        owned_by="google",
+        hosted="cloud",
+        include_expensive=frozenset({"image"}),
+    )
+    assert no_genera.capabilities["image"] is False
+
+
+@pytest.mark.asyncio
+async def test_un_cooldown_de_imagen_conserva_la_etiqueta_previa():
+    """La generación se rate-limitea. Un cooldown NO significa que el modelo no
+    sepa generar: se conserva lo último conocido en vez de sacarlo de los tiers."""
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+
+    class Cooldown(FakeBackend):
+        async def image(self, prompt, *, model, size=None, quality=None):
+            raise CliproxyRetryableError("model_cooldown: 429")
+
+    card = await probe_model(
+        Cooldown(),
+        "flash-image",
+        owned_by="google",
+        hosted="cloud",
+        include_expensive=frozenset({"image"}),
+        previous_card={"capabilities": {"image": True}},  # antes SÍ generaba
+    )
+    assert card.capabilities["image"] is True  # se conservó, no se marcó false

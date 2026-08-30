@@ -318,17 +318,17 @@ async def test_respuesta_es_chat_completion_con_fuentes_aparte():
 
 
 @pytest.mark.asyncio
-async def test_imagen_sale_siempre_como_data_uri():
-    """Las dos vías de arriba entregan formatos distintos; el contrato de
-    salida es uno solo."""
+async def test_imagen_default_es_b64_json():
+    """Sin `response_format`, el default de OpenAI es b64_json: base64 pelado en
+    `data[].b64_json`. Las dos vías internas (chat vs /images) entregan formatos
+    distintos, pero el contrato de salida es uno solo y respeta lo pedido."""
     fake = FakeCliproxyClient(
         LLMResult(text="", model="gpt-image-2", images=["data:image/png;base64,AAA"])
     )
     response = await call(
         build_app(fake), "POST", "/v1/images/generations", json={"prompt": "un cubo"}
     )
-    body = response.json()
-    assert body["data"][0]["url"].startswith("data:image/")
+    assert response.json()["data"][0] == {"b64_json": "AAA"}
 
 
 # ─── Errores ──────────────────────────────────────────────────────────────────
@@ -939,3 +939,31 @@ async def test_v1_capabilities_expone_el_mapa_y_los_tiers():
         assert body["tiers"]["cheap"]["chat"] == ["barato"]
     finally:
         router_mod.load_tiers = load_tiers
+
+
+@pytest.mark.asyncio
+async def test_imagen_respeta_response_format_b64_json():
+    """Bug reportado: se pedía b64_json y llegaba una url con data-URI. Ahora el
+    contrato de OpenAI se respeta: b64_json → base64 pelado; url → data-URI."""
+    from src.modules.providers.cliproxy.translate import LLMResult
+
+    fake = FakeCliproxyClient(
+        LLMResult(text="", model="gemini-3.1-flash-image", images=["data:image/png;base64,QUJD"])
+    )
+
+    b64 = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/generations",
+        json={"prompt": "x", "response_format": "b64_json"},
+    )
+    item = b64.json()["data"][0]
+    assert item == {"b64_json": "QUJD"}  # pelado, sin cabecera data:
+
+    url = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/generations",
+        json={"prompt": "x", "response_format": "url"},
+    )
+    assert url.json()["data"][0] == {"url": "data:image/png;base64,QUJD"}
