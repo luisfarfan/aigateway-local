@@ -7,7 +7,7 @@ All settings are typed and validated by Pydantic at startup.
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,29 @@ class Settings(BaseSettings):
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "local_ai_gateway"
+
+    # Crear las tablas desde los modelos al arrancar. Cómodo en desarrollo,
+    # PELIGROSO en producción: `create_all` crea lo que falta pero no altera lo
+    # que ya existe, así que un campo renombrado en los modelos se queda con el
+    # nombre viejo en la base y el desajuste no se nota hasta que un INSERT
+    # falla. En producción se apaga y el arranque sólo comprueba que la base
+    # esté en la última revisión de Alembic.
+    db_auto_create_tables: bool = True
+
+    @model_validator(mode="after")
+    def _no_crear_tablas_en_produccion(self) -> "Settings":
+        """En producción se apaga solo, sin depender de que alguien lo configure.
+
+        Un default peligroso que hay que acordarse de desactivar termina activo
+        el día que se despliega con prisa. Si de verdad hace falta —una base
+        efímera de pruebas de carga, por ejemplo— se enciende explícito con
+        `DB_AUTO_CREATE_TABLES=true`, y entonces es una decisión y no un olvido.
+        """
+        import os
+
+        if self.environment == "production" and "DB_AUTO_CREATE_TABLES" not in os.environ:
+            object.__setattr__(self, "db_auto_create_tables", False)
+        return self
     postgres_user: str = "gateway"
     postgres_password: str = "gateway_secret"
 

@@ -22,7 +22,7 @@ import structlog
 from fastapi import FastAPI
 
 from src.core.config import get_settings
-from src.core.database import create_all_tables, dispose_engine
+from src.core.database import create_all_tables, dispose_engine, verify_schema_is_current
 from src.core.logging import configure_logging
 from src.core.redis import close_arq_pool, close_redis, get_arq_pool
 from src.core.storage import storage
@@ -139,9 +139,20 @@ async def lifespan(app: FastAPI):
         environment=settings.environment,
     )
 
-    # Database
-    await create_all_tables()  # dev: creates tables; prod: use `alembic upgrade head`
-    log.info("database_ready")
+    # Base de datos. Dos vías, y NUNCA las dos a la vez.
+    #
+    # En desarrollo se crean las tablas desde los modelos, que es cómodo. En
+    # producción no: el esquema lo pone `alembic upgrade head` y el arranque sólo
+    # COMPRUEBA que esté al día. Tener las dos activas fue lo que produjo el
+    # desajuste que rompió el plano de jobs — `create_all` crea lo que falta pero
+    # no altera lo que existe, así que un campo renombrado en los modelos se
+    # queda con el nombre viejo en la base, en silencio, hasta que un INSERT
+    # falla en caliente.
+    if settings.db_auto_create_tables:
+        await create_all_tables()
+    else:
+        await verify_schema_is_current()
+    log.info("database_ready", auto_create=settings.db_auto_create_tables)
 
     # Object storage
     await storage.ensure_bucket()

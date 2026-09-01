@@ -8,6 +8,7 @@ Usage in FastAPI endpoints (dependency injection):
     async def my_endpoint(session: AsyncSession = Depends(get_session)):
         ...
 """
+
 from collections.abc import AsyncGenerator
 
 import structlog
@@ -24,7 +25,7 @@ _settings = get_settings()
 # pool_pre_ping: validates connections before use (handles dropped DB connections).
 engine = create_async_engine(
     _settings.database_url,
-    echo=False,                     # keep logs clean
+    echo=False,  # keep logs clean
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
@@ -58,19 +59,75 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def create_all_tables() -> None:
-    """
-    Creates all tables defined in SQLModel metadata.
-    Called at app startup in development. In production, use Alembic migrations.
+def _import_models() -> None:
+    """Registra todos los modelos en la metadata de SQLModel.
 
-    Importing all models here ensures SQLModel metadata is populated before create_all.
+    Un módulo que no se importe acá es invisible tanto para `create_all` como
+    para el autogenerate de Alembic. Faltaba `observability`, y por eso una
+    baseline autogenerada salió sin `llm_requests` ni `llm_attempts` — sin las
+    tablas que sostienen toda la contabilidad de costos.
     """
-    # These imports must happen before create_all so SQLModel registers the tables.
     import src.modules.jobs.models  # noqa: F401
+    import src.modules.observability.models  # noqa: F401
 
+
+async def create_all_tables() -> None:
+    """Crea las tablas desde los modelos. **Sólo para desarrollo.**
+
+    En producción no se llama: el esquema lo pone `alembic upgrade head`. Tener
+    las dos vías activas a la vez es lo que produjo el desajuste que rompió el
+    plano de jobs — `create_all` crea lo que falta pero NO altera lo que ya
+    existe, así que un campo renombrado en los modelos queda con el nombre viejo
+    en la base y nadie se entera hasta que un INSERT falla.
+    """
+    _import_models()
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     log.info("database_tables_created")
+
+
+class SchemaOutOfDate(RuntimeError):
+    """La base no está en la última revisión de Alembic."""
+
+
+async def verify_schema_is_current() -> None:
+    """Comprueba que la base esté migrada. Levanta si no, para no arrancar.
+
+    Arrancar contra un esquema viejo no da un error limpio: da fallos parciales
+    y tardíos —un INSERT que revienta cuando ya se llamó al proveedor y se subió
+    el archivo— y eso se diagnostica mucho peor que no arrancar.
+
+    Si la comprobación misma falla (no se puede leer la configuración de
+    Alembic), se avisa y se sigue: un bug en el chequeo no puede dejar el
+    servicio en el piso.
+    """
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import text
+
+    try:
+        raiz = Path(__file__).resolve().parents[2]
+        script = ScriptDirectory.from_config(Config(str(raiz / "alembic.ini")))
+        cabeza = script.get_current_head()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("schema_check_skipped", error=str(exc)[:200])
+        return
+
+    async with engine.begin() as conn:
+        result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+        actual = result.scalar_one_or_none()
+
+    if actual == cabeza:
+        log.info("schema_current", revision=actual)
+        return
+
+    raise SchemaOutOfDate(
+        f"La base está en la revisión {actual or '(ninguna)'} y el código espera "
+        f"{cabeza}. Correr `alembic upgrade head` antes de arrancar. Si la base ya "
+        f"tiene el esquema correcto pero nunca se marcó, `alembic stamp head`."
+    )
 
 
 async def dispose_engine() -> None:

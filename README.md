@@ -174,10 +174,37 @@ dejaría `upgrade head` roto justo donde no debía hacer nada.
 .venv/bin/python -m alembic stamp head
 ```
 
-> **`create_all` sigue corriendo al arrancar la API** (`lifespan.py`), pensado
-> para desarrollo. Con migraciones ya en el repo, esa doble vía puede crear
-> tablas que Alembic no conoce y esconder la deriva. En producción conviene
-> `alembic upgrade head` y nada más.
+**Las dos vías nunca están activas a la vez.** En desarrollo el arranque crea las
+tablas desde los modelos, que es cómodo; en producción **no las crea y sólo
+comprueba** que la base esté en la última revisión:
+
+| `ENVIRONMENT` | Al arrancar |
+|---|---|
+| `development` | `create_all` desde los modelos |
+| `production` | verifica `alembic_version` contra la última revisión, y **no arranca** si no coincide |
+
+Se apaga solo en producción, sin depender de que nadie lo configure — un default
+peligroso que hay que acordarse de desactivar termina activo el día que se
+despliega con prisa. Para forzarlo (una base efímera de pruebas de carga, por
+ejemplo): `DB_AUTO_CREATE_TABLES=true`, explícito.
+
+Si la base no está migrada, el arranque falla con las dos salidas posibles:
+
+```
+La base está en la revisión 7b8bb7dc02fa y el código espera 29d01702ba9c.
+Correr `alembic upgrade head` antes de arrancar. Si la base ya tiene el esquema
+correcto pero nunca se marcó, `alembic stamp head`.
+```
+
+Por qué no arrancar en vez de avisar: un esquema viejo no da un error limpio, da
+fallos parciales y tardíos — un INSERT que revienta **cuando ya se llamó al
+proveedor y se subió el archivo**. Eso se diagnostica mucho peor que un servicio
+que no levanta. Es exactamente cómo se descubrió el desajuste de las columnas de
+metadatos.
+
+> `create_all` crea lo que falta pero **no altera lo que ya existe**. Por eso la
+> doble vía era peligrosa: un campo renombrado en los modelos se quedaba con el
+> nombre viejo en la base, en silencio, hasta que algo fallaba en caliente.
 
 ### 5. Start the API and worker
 
