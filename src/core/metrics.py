@@ -110,3 +110,19 @@ llm_fallback_total = Counter(
     "`upstream_unavailable` es cuota. Se arreglan distinto.",
     ["route", "from_model", "to_model", "reason"],
 )
+
+
+gemini_web_session_valid = Gauge(
+    "gateway_gemini_web_session_valid",
+    "1 si la cookie de sesión de la app web de Gemini sigue viva, 0 si no. Es "
+    "un gauge y no un contador porque lo que importa es el estado ACTUAL: esa "
+    "credencial no se renueva sola cuando muere de verdad, necesita que una "
+    "persona abra un navegador.",
+)
+
+gemini_web_session_checks_total = Counter(
+    "gateway_gemini_web_session_checks_total",
+    "Chequeos de la sesión por resultado (ok/expired/error). Si `error` sube "
+    "sin que `expired` suba, el problema es la sonda, no la credencial.",
+    ["outcome"],
+)

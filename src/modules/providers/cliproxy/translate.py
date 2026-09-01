@@ -17,7 +17,10 @@ Las tres asimetrías que justifican el módulo:
   * **Websearch de OpenAI** — endpoint distinto (`/v1/responses`), forma de
     respuesta distinta (`output[]` con `web_search_call` + `message`).
   * **Imagen de Gemini** — no sale por `/v1/images/generations` sino dentro del
-    mensaje de chat, en `images[].image_url.url`, como data URI.
+    mensaje de chat, en `images[].image_url.url`, como data URI. La edición
+    desde una foto es la misma asimetría en espejo: OpenAI la recibe como
+    archivo en `/v1/images/edits` (multipart), Gemini como un bloque `image_url`
+    dentro del mismo mensaje de chat por el que la devuelve.
 
 Hacia afuera el gateway sigue hablando OpenAI (`to_openai_chat_completion`); la
 asimetría es interna.
@@ -25,6 +28,7 @@ asimetría es interna.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -413,6 +417,97 @@ def parse_image(payload: dict[str, Any], *, model: str) -> LLMResult:
         prompt_tokens=int(usage.get("input_tokens") or 0),
         completion_tokens=int(usage.get("output_tokens") or 0),
         images=images,
+    )
+
+
+# ─── Edición de imagen (image-to-image) ───────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class InputImage:
+    """Una imagen que ENTRA en la petición, ya en bytes.
+
+    Se guarda cruda y no como data URI porque los dos caminos la quieren de
+    forma distinta: OpenAI la sube como archivo en multipart, Gemini la manda
+    embebida en el JSON del chat. Convertir una sola vez, al final, evita
+    codificar a base64 una imagen que iba a viajar binaria.
+    """
+
+    content: bytes
+    filename: str = "image.png"
+    content_type: str = "image/png"
+
+    def to_data_uri(self) -> str:
+        b64 = base64.b64encode(self.content).decode()
+        return f"data:{self.content_type};base64,{b64}"
+
+
+@dataclass(frozen=True)
+class MultipartRequest:
+    """Un request que viaja como `multipart/form-data`, no como JSON.
+
+    Existe porque `/v1/images/edits` es la única superficie del gateway que sube
+    archivos. Es un tipo aparte de `Request` a propósito: así el cliente HTTP no
+    tiene que adivinar por el contenido si serializar a JSON o a multipart.
+    """
+
+    path: str
+    data: dict[str, str]
+    files: list[tuple[str, tuple[str, bytes, str]]]
+
+
+def image_edit_request(
+    *,
+    model: str,
+    prompt: str,
+    images: list[InputImage],
+    size: str | None = None,
+    quality: str | None = None,
+) -> Request | MultipartRequest:
+    """Edición desde una foto. Las dos familias lo hacen por sitios distintos.
+
+    **OpenAI** (`gpt-image-2`) — `POST /v1/images/edits` con multipart. Medido
+    contra la instancia: devuelve 200 con la imagen en `data[].b64_json`, y
+    respeta la identidad del producto de entrada, que es el requisito de un
+    catálogo de ecommerce.
+
+    **Gemini** (Nano Banana) — no tiene superficie de edición propia por acá.
+    La imagen de entrada viaja como un bloque `image_url` dentro del mensaje de
+    chat, que es la misma vía por la que devuelve la de salida.
+
+    Sobre `size`, medido con `gpt-image-2` y contraintuitivo: **mandarlo empeora
+    el encuadre**. Sin `size`, una entrada de 1254x1254 salió 1254x1254 —respeta
+    la proporción de la foto—. Pidiendo `1024x1024` sobre esa misma entrada
+    devolvió 1402x1122. Así que el parámetro ni se cumple ni es inocuo: por
+    defecto conviene no mandarlo y dejar que herede la proporción del original.
+    Una ficha de producto que exija una proporción exacta tiene que recortar
+    después; no hay forma de pedirla acá.
+    """
+    if is_gemini_model(model):
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        content += [
+            {"type": "image_url", "image_url": {"url": img.to_data_uri()}} for img in images
+        ]
+        return Request(
+            path="/v1/chat/completions",
+            body={
+                "model": model,
+                "messages": [{"role": "user", "content": content}],
+                "max_tokens": 4096,
+            },
+        )
+
+    data: dict[str, str] = {"model": model, "prompt": prompt}
+    if size:
+        data["size"] = size
+    if quality:
+        data["quality"] = quality
+    # `image[]` y no `image`: es la forma que acepta varias referencias a la vez
+    # (producto + fondo de marca, p. ej.), y con una sola se comporta igual.
+    return MultipartRequest(
+        path="/v1/images/edits",
+        data=data,
+        files=[("image[]", (img.filename, img.content, img.content_type)) for img in images],
     )
 
 

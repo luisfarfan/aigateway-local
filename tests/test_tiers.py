@@ -82,3 +82,91 @@ def test_is_tier_distingue_tier_de_modelo():
     t = _table()
     assert t.is_tier("cheap")
     assert not t.is_tier("gemini-3-flash")
+
+
+# ─── Tiers en rutas de imagen ─────────────────────────────────────────────────
+
+
+def _tabla_imagen():
+    """Mapa mínimo con dos modelos de imagen y uno de chat, para probar que la
+    ruta —y no el tier— es la que exige la capacidad."""
+    from src.modules.routing.tiers import ModelInfo, TierPolicy, TierTable
+
+    return TierTable(
+        policies={
+            "fast": TierPolicy(name="fast", rank_by="latency_asc"),
+            "cheap": TierPolicy(name="cheap", rank_by="cost_asc"),
+        },
+        models={
+            "rapido-caro": ModelInfo(
+                id="rapido-caro",
+                family="openai",
+                capabilities={"image": True},
+                latency_s=1.0,
+                cost=1.0,
+                image_latency_s=15.0,
+                image_cost=0.04,
+            ),
+            "lento-barato": ModelInfo(
+                id="lento-barato",
+                family="google",
+                capabilities={"image": True},
+                latency_s=99.0,
+                cost=99.0,
+                image_latency_s=90.0,
+                image_cost=0.03,
+            ),
+            "solo-chat": ModelInfo(
+                id="solo-chat",
+                family="openai",
+                capabilities={"chat": True},
+                latency_s=0.5,
+                cost=0.1,
+            ),
+        },
+    )
+
+
+def test_fast_en_imagen_ordena_por_latencia_de_imagen():
+    """Un sistema que genera de a una y espera pide `fast` y recibe el más
+    rápido MEDIDO EN IMAGEN — 15 s contra 90 s. Ordenarlo por la latencia de
+    chat sería ordenar por otra cosa: son órdenes de magnitud distintos."""
+    assert _tabla_imagen().resolve("fast", route="image") == ["rapido-caro", "lento-barato"]
+
+
+def test_cheap_en_imagen_ordena_por_precio_POR_IMAGEN():
+    """Los modelos de imagen se tarifan por unidad, no por token. Con el precio
+    de token, gpt-image-2 heredaría la tarifa de su familia (11.25) y quedaría
+    último por una cifra que no aplica a esta ruta."""
+    assert _tabla_imagen().resolve("cheap", route="image") == ["lento-barato", "rapido-caro"]
+
+
+def test_un_modelo_de_solo_chat_no_entra_en_una_ruta_de_imagen():
+    """La ruta aporta su capacidad requerida. Es lo que permite que los tiers no
+    repitan `require: [chat]` y sirvan igual en todas las rutas."""
+    for tier in ("fast", "cheap"):
+        assert "solo-chat" not in _tabla_imagen().resolve(tier, route="image")
+
+
+def test_image_edit_exige_la_misma_capacidad_que_image():
+    """Sin mapear `image_edit`, un tier sobre esa ruta no exigiría NADA y
+    dejaría entrar modelos de sólo texto a una ruta de imagen."""
+    from src.modules.routing.tiers import ROUTE_CAPABILITY
+
+    assert ROUTE_CAPABILITY["image_edit"] == "image"
+    assert _tabla_imagen().resolve("fast", route="image_edit") == ["rapido-caro", "lento-barato"]
+
+
+def test_los_tiers_ya_no_repiten_la_capacidad_de_la_ruta():
+    """Regresión de la política: `require: [chat]` en los tiers medibles los
+    dejaba inservibles fuera de las rutas de texto — un modelo de imagen tiene
+    `chat: False` y quedaba filtrado de `fast` y de `cheap`."""
+    from src.modules.routing.tiers import load_tiers
+
+    tabla = load_tiers()
+    for nombre in ("cheap", "fast"):
+        politica = tabla.policies.get(nombre)
+        assert politica is not None
+        assert "chat" not in politica.require, (
+            f"{nombre} repite la capacidad de la ruta; volvería a excluir imagen"
+        )

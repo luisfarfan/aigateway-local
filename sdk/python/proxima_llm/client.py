@@ -11,12 +11,18 @@ el transporte.
 
 from __future__ import annotations
 
+import mimetypes
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from proxima_llm import _protocol as p
 from proxima_llm.types import Completion, Embeddings
+
+# Una imagen de entrada: ruta en disco, bytes crudos, o `(nombre, bytes)` cuando
+# quien llama quiere controlar el nombre —y con él el tipo que se declara—.
+ImageInput = str | Path | bytes | tuple[str, bytes]
 
 DEFAULT_TIMEOUT_SECONDS = 300.0
 
@@ -38,7 +44,11 @@ class _Base:
         self._timeout = timeout_seconds
         # `X-Proxima-Project` es lo que separa la contabilidad de costos entre
         # consumidores. Sin él, todo el gasto cae en un mismo balde.
-        headers = {"Content-Type": "application/json", "X-Proxima-Project": project}
+        # El `Content-Type` NO se fija acá: httpx ya pone `application/json`
+        # cuando se manda `json=`, y fijarlo a nivel de cliente pisaba el
+        # `multipart/form-data; boundary=...` de `image_edit()` — el gateway
+        # recibía un multipart etiquetado como JSON y contestaba 422.
+        headers = {"X-Proxima-Project": project}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         if client_id:
@@ -155,6 +165,41 @@ class Gateway(_Base):
     ) -> Completion:
         body = p.image_body(prompt, model=model, size=size, quality=quality)
         return p.read_images(await self._request("POST", "/v1/images/generations", body))
+
+    async def image_edit(
+        self,
+        prompt: str,
+        images: ImageInput | list[ImageInput],
+        *,
+        model: str | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+    ) -> Completion:
+        """Recontextualiza una FOTO real en vez de generar desde cero.
+
+        Es lo que preserva la identidad del producto: para un catálogo, una
+        imagen inventada que se le parece no sirve. `images` acepta varias
+        referencias (producto + fondo de marca, p. ej.).
+
+        Cada elemento puede ser una ruta, unos bytes, o `(nombre, bytes)`.
+        """
+        files = _as_files(images)
+        form = p.image_edit_form(prompt, model=model, size=size, quality=quality)
+        headers = self._headers_for(no_cache=False)
+        try:
+            response = await self._http.post(
+                "/v1/images/edits", data=form, files=files, headers=headers
+            )
+        except httpx.HTTPError as exc:
+            from proxima_llm.errors import ProximaError
+
+            raise ProximaError(
+                f"gateway inalcanzable: {exc}", kind="unreachable", retryable=True
+            ) from exc
+
+        payload = _json_or_empty(response)
+        p.raise_for_error(response.status_code, payload)
+        return p.read_images(payload)
 
     async def embed(self, texts: str | list[str], *, model: str | None = None) -> Embeddings:
         """Vectores para búsqueda semántica. Los sirve un modelo local, así que
@@ -282,6 +327,39 @@ class SyncGateway(_Base):
         body = p.image_body(prompt, model=model, size=size, quality=quality)
         return p.read_images(self._request("POST", "/v1/images/generations", body))
 
+    def image_edit(
+        self,
+        prompt: str,
+        images: ImageInput | list[ImageInput],
+        *,
+        model: str | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+    ) -> Completion:
+        """Recontextualiza una FOTO real en vez de generar desde cero.
+
+        Es lo que preserva la identidad del producto: para un catálogo, una
+        imagen inventada que se le parece no sirve. `images` acepta varias
+        referencias (producto + fondo de marca, p. ej.).
+
+        Cada elemento puede ser una ruta, unos bytes, o `(nombre, bytes)`.
+        """
+        files = _as_files(images)
+        form = p.image_edit_form(prompt, model=model, size=size, quality=quality)
+        headers = self._headers_for(no_cache=False)
+        try:
+            response = self._http.post("/v1/images/edits", data=form, files=files, headers=headers)
+        except httpx.HTTPError as exc:
+            from proxima_llm.errors import ProximaError
+
+            raise ProximaError(
+                f"gateway inalcanzable: {exc}", kind="unreachable", retryable=True
+            ) from exc
+
+        payload = _json_or_empty(response)
+        p.raise_for_error(response.status_code, payload)
+        return p.read_images(payload)
+
     def embed(self, texts: str | list[str], *, model: str | None = None) -> Embeddings:
         items = [texts] if isinstance(texts, str) else list(texts)
         return p.read_embeddings(
@@ -313,6 +391,38 @@ class SyncGateway(_Base):
         payload = _json_or_empty(response)
         p.raise_for_error(response.status_code, payload)
         return payload
+
+
+def _as_files(
+    images: ImageInput | list[ImageInput],
+) -> list[tuple[str, tuple[str, bytes, str]]]:
+    """Normaliza las tres formas de pasar una imagen a lo que espera httpx.
+
+    Se aceptan las tres porque el llamador rara vez tiene la misma: un script
+    tiene una ruta, un worker tiene bytes que acaba de descargar, y quien
+    genera al vuelo quiere ponerle nombre. Obligar a una sola sería trasladarle
+    la conversión a cada consumidor.
+    """
+    items = images if isinstance(images, list) else [images]
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for index, item in enumerate(items):
+        if isinstance(item, tuple):
+            name, content = item
+        elif isinstance(item, bytes | bytearray):
+            name, content = f"image{index}.png", bytes(item)
+        else:
+            path = Path(item)
+            name, content = path.name, path.read_bytes()
+        files.append(("image", (name, content, _content_type_of(name))))
+    return files
+
+
+def _content_type_of(filename: str) -> str:
+    """El upstream mira el tipo declarado, no los bytes: un JPEG anunciado como
+    PNG lo rechaza. `mimetypes` acierta por extensión y PNG es el default sano
+    para un nombre sin extensión."""
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed if guessed and guessed.startswith("image/") else "image/png"
 
 
 def _json_or_empty(response: httpx.Response) -> dict[str, Any]:

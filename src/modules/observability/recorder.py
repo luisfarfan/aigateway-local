@@ -90,8 +90,8 @@ class Observation:
         self.retryable = retryable
 
     def cost(self) -> Cost:
-        """Imagen se cobra por unidad; el resto por token."""
-        if self.route == "image" and self.image_count:
+        """Imagen se cobra por unidad —generada o editada—; el resto por token."""
+        if self.route in ("image", "image_edit") and self.image_count:
             return cost_of_images(
                 model=self.response_model or self.requested_model,
                 image_count=self.image_count,

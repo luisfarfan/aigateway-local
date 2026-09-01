@@ -14,8 +14,12 @@ Dos clases de tier, y la diferencia es honesta:
     —humano o respaldado por evals— y se marca como tal. Lo único que el sistema
     hace solo es AVISAR cuando aparece un modelo sin clasificar.
 
-La ruta pedida (chat/websearch/image/…) aporta su propia capacidad requerida, que
-se intersecta con la del tier: `cheap` en websearch = barato Y con websearch.
+La ruta pedida (chat/websearch/image/…) aporta su propia capacidad requerida, así
+que los tiers NO la repiten: `fast` significa "el más rápido de lo que esta ruta
+necesita", y sirve igual para chat que para imagen sin listas por ruta.
+
+Las rutas de imagen se ordenan con sus propias cifras —latencia de imagen y
+precio por unidad—, no con las de chat. Mezclarlas ordena por algo que no aplica.
 """
 
 from __future__ import annotations
@@ -40,8 +44,18 @@ ROUTE_CAPABILITY = {
     "structured": "chat",
     "websearch": "websearch",
     "image": "image",
+    # Editar exige la misma capacidad que generar: el prober sondea "image" y no
+    # distingue las dos. Sin esta entrada, un tier sobre `image_edit` no exigiría
+    # NADA y dejaría entrar modelos de sólo texto a una ruta de imagen.
+    "image_edit": "image",
     "embeddings": "embeddings",
 }
+
+# Rutas que se tarifan y se miden por imagen, no por token. La distinción existe
+# porque ordenar `cheap` con el precio por token de un modelo de imagen da el
+# orden equivocado: gpt-image-2 no tiene tarifa por token y heredaría la de su
+# familia (11.25), quedando último por una cifra que no aplica.
+IMAGE_ROUTES = frozenset({"image", "image_edit"})
 
 
 @dataclass(frozen=True)
@@ -62,9 +76,19 @@ class ModelInfo:
     capabilities: dict[str, bool]
     latency_s: float
     cost: float  # costo combinado in+out para ordenar; float('inf') si sin precio
+    image_latency_s: float = 999.0
+    image_cost: float = float("inf")  # por imagen, de `pricing.images`
 
     def has(self, cap: str) -> bool:
         return bool(self.capabilities.get(cap))
+
+    def latency_for(self, route: str) -> float:
+        """Una generación de imagen tarda 15-90 s y un chat menos de 2. Ordenar
+        `fast` en imagen con la latencia de chat sería ordenar por otra cosa."""
+        return self.image_latency_s if route in IMAGE_ROUTES else self.latency_s
+
+    def cost_for(self, route: str) -> float:
+        return self.image_cost if route in IMAGE_ROUTES else self.cost
 
 
 @dataclass
@@ -103,9 +127,9 @@ class TierTable:
             return [mid for mid in policy.order if mid in by_id]
 
         if policy.rank_by == "cost_asc":
-            eligible.sort(key=lambda m: (m.cost, m.latency_s))
+            eligible.sort(key=lambda m: (m.cost_for(route), m.latency_for(route)))
         elif policy.rank_by == "latency_asc":
-            eligible.sort(key=lambda m: (m.latency_s, m.cost))
+            eligible.sort(key=lambda m: (m.latency_for(route), m.cost_for(route)))
 
         return [m.id for m in eligible]
 
@@ -193,11 +217,16 @@ def _load_models(path: Path) -> dict[str, ModelInfo]:
         cost = float("inf")
         if rate is not None:
             cost = float(rate.get("input", 0.0)) + float(rate.get("output", 0.0))
+        image_rate = pricing.images.get(model_id) or {}
         models[model_id] = ModelInfo(
             id=model_id,
             family=family,
             capabilities=card.get("capabilities") or {},
             latency_s=float(card.get("chat_latency_s") or 999.0),
             cost=cost,
+            # Sin medir todavía, un modelo va al final de `fast` en vez de
+            # colarse primero por un 0 que nadie midió.
+            image_latency_s=float(card.get("image_latency_s") or 999.0),
+            image_cost=float(image_rate.get("per_image", float("inf"))),
         )
     return models

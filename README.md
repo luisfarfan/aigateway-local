@@ -624,7 +624,8 @@ son dos puertas.
 
 ```
 POST /v1/chat/completions     chat, búsqueda web, visión y salida estructurada
-POST /v1/images/generations   generación de imagen
+POST /v1/images/generations   generación de imagen (desde texto)
+POST /v1/images/edits         edición de imagen (desde una foto, image-to-image)
 POST /v1/embeddings           vectores para búsqueda semántica y RAG
 GET  /v1/models               inventario (cloud + local + tiers)
 GET  /v1/capabilities         qué sabe hacer cada modelo + a qué resuelve cada tier
@@ -836,6 +837,232 @@ gastando la cuota sin traer nada.
 Para lotes o cuando no quieras esperar, usa el [plano de jobs](#plano-de-jobs-apiv1jobs):
 la imagen queda como artefacto en MinIO con URL firmada.
 
+### Edición de imagen (image-to-image)
+
+Generar y editar no son lo mismo y ninguna reemplaza a la otra. Generar inventa
+desde el prompt; **editar parte de una foto real y preserva la identidad de lo que
+hay en ella** — que es lo único que sirve cuando la imagen tiene que ser del
+producto que de verdad vendes, no de uno que se le parece.
+
+Es `multipart/form-data`, no JSON, porque la foto sube como archivo:
+
+```bash
+curl -X POST http://192.168.1.12:8000/v1/images/edits \
+  -H "Authorization: Bearer $CLAVE" \
+  -H "X-Proxima-Project: mi-tienda" \
+  -F "image=@producto.png" \
+  -F "prompt=Coloca esta taza sobre una mesa de madera rústica, luz de mañana, foto lifestyle de ecommerce. Mantén la taza idéntica."
+```
+
+La respuesta tiene la misma forma que `/v1/images/generations` y respeta
+`response_format` igual (default `b64_json`).
+
+`image` se puede repetir para dar varias referencias en una sola petición
+(producto + fondo de marca, por ejemplo):
+
+```bash
+  -F "image=@producto.png" -F "image=@fondo-marca.png"
+```
+
+**No mandes `size`.** Medido contra `gpt-image-2`: omitiéndolo, la salida hereda la
+proporción de la foto de entrada (1254x1254 → 1254x1254), que es casi siempre lo
+que quieres. Pidiendo `1024x1024` sobre esa misma foto devolvió **1402x1122** — ni
+cumple lo pedido ni conserva el original. Si necesitas una proporción exacta para
+una ficha de producto, recorta después: no hay forma de exigirla acá.
+
+Cadena por defecto (`config/routing.yaml`, ruta `image_edit`):
+
+| Modelo | Vía | Estado |
+|---|---|---|
+| `gpt-image-2` | `/v1/images/edits` (multipart) | **verificado** contra la instancia |
+| `gemini-3.1-flash-image` | bloque `image_url` dentro del chat | implementado, **sin verificar** — su cuota estaba agotada al cablearlo (429, reset 2026-09-05) |
+| `geminiweb/nano-banana-web` | app web de Gemini, por cookie | **verificado**, pero APAGADO por defecto — ver abajo |
+
+El orden es ese por eso mismo, no por preferencia: encabeza la cadena lo que está
+medido. Si Gemini falla al probarse, el breaker lo saca solo.
+
+`gpt-image-2` y `gpt-image-1.5` necesitan una cuenta **Codex Plus**; con una free
+responden `auth_not_found` y la cadena salta al siguiente.
+
+#### Último recurso: la app web de Gemini (`geminiweb/`)
+
+Apagado por defecto. Existe para que la ruta de imagen tenga fondo: la cuota de
+`gemini-3.1-flash-image` por antigravity choca contra un tope **semanal**
+(medido: 429 con reset a ~116 h) y `gpt-image-2` depende de que la suscripción
+Codex Plus siga viva. Si las dos caen, sin esto la cadena se queda sin nada.
+
+No es una API: es la app web de Gemini manejada por
+[`gemini_webapi`](https://github.com/HanaokaYuzu/Gemini-API), con la cookie de
+sesión del navegador. Verificado end-to-end por este gateway — devolvió un JPEG
+de 2048x2048 editando desde una foto.
+
+Para encenderlo:
+
+```bash
+pip install -e ".[geminiweb]"
+```
+
+```env
+ENABLE_BACKEND_GEMINI_WEB=true
+GEMINI_WEB_SECURE_1PSID="..."      # cookie de gemini.google.com
+GEMINI_WEB_SECURE_1PSIDTS="..."
+```
+
+Las cookies salen del navegador (DevTools → Application → Cookies →
+`gemini.google.com`), o automáticamente con `browser-cookie3` si el llavero del
+escritorio está desbloqueado.
+
+**Va último en las cadenas por tres razones medidas, no estéticas:**
+
+1. **Fidelidad menor al producto.** Editando la MISMA foto, `gpt-image-2`
+   conservó la taza original; esta vía la reinterpretó —asa distinta,
+   proporción más alta—. Para un catálogo eso es el fallo que no se puede
+   tener: el cliente compra lo que ve.
+2. **Es ingeniería inversa.** No hay contrato de API. Cuando Google cambie la
+   app web, se rompe sin aviso ni changelog.
+3. **La credencial es la sesión ENTERA de una cuenta de Google**, no una API
+   key revocable. Si algo sale mal, el alcance es la cuenta completa. Conviene
+   una cuenta secundaria, no la principal.
+
+Además: `gemini_webapi` es **AGPL-3.0**, por eso es dependencia opcional y este
+repo se distribuye sin ella. Para uso privado en red local no dispara
+obligaciones; antes de distribuir el gateway o exponerlo a terceros con esto
+activo, revisar la §13 (el uso en red cuenta como distribución).
+
+Lo que este backend **no** hace, y lo declara con `BackendCapabilityError` para
+que el routing salte al siguiente: websearch, embeddings, streaming, function
+calling y salida estructurada. Y si la app web contesta texto en vez de imagen
+—un rechazo, o "no puedo editar"— se levanta un error reintentable en vez de
+devolver un 200 con `data: []`.
+
+#### Vigilancia de la sesión y aviso cuando expira
+
+La cookie no es una API key: **expira, y no se recupera sola.** La librería rota
+`__Secure-1PSIDTS` en segundo plano, así que el vencimiento corto está cubierto;
+pero cuando la sesión muere de verdad —cerraste sesión, cambiaste la contraseña,
+Google la invalidó— hace falta un navegador.
+
+Sin vigilancia el fallo es silencioso: la cookie muere, el breaker saca el
+backend, y la ruta de imagen se queda sin su último recurso durante días sin que
+nadie lo note. Justo hasta el día que además caigan los otros dos.
+
+Por eso hay un monitor propio, aparte del watchdog de routing (que abre
+circuitos pero no avisa a nadie):
+
+- Comprueba la sesión cada `GEMINI_WEB_SESSION_CHECK_INTERVAL_S` (30 min por
+  defecto) con una sonda barata que **no** gasta cuota de imagen.
+- Publica `gateway_gemini_web_session_valid` (1/0) y
+  `gateway_gemini_web_session_checks_total{outcome}` para Grafana.
+- Avisa **por flanco**: al pasar de viva a muerta, y otra vez al recuperarse.
+  Nunca en cada barrido — una alerta repetida se ignora, y una alerta ignorada
+  es peor que ninguna. El estado del flanco vive en Redis para que API y worker
+  no avisen dos veces de lo mismo.
+
+Canal de aviso (opcional; sin configurar, sólo queda el log y la métrica):
+
+```env
+TELEGRAM_BOT_TOKEN="123456:ABC..."   # de @BotFather
+TELEGRAM_CHAT_ID="123456789"         # de https://api.telegram.org/bot<token>/getUpdates
+```
+
+Es un puerto (`src/modules/notifications/`), no una llamada suelta a Telegram:
+cambiar a ntfy, un webhook o correo es escribir otro adaptador, sin tocar nada
+de lo que detecta el problema.
+
+**Rehacer la sesión** cuando llega el aviso:
+
+```bash
+python scripts/gemini_web_login.py           # extrae del navegador y valida
+python scripts/gemini_web_login.py --check   # sólo comprobar la actual
+```
+
+**Ojo con el perfil del navegador.** Chrome guarda un almacén de cookies por
+perfil (`Default`, `Profile 1`, `Profile 2`…), y `browser-cookie3` lee `Default`
+salvo que se le diga otra cosa. Si iniciaste sesión en otro perfil, la
+extracción devuelve una cookie vieja de una cuenta distinta — que valida a medias
+y confunde el diagnóstico. Para saber cuál perfil tiene la sesión buena, mirá
+cuál archivo de cookies se escribió recién:
+
+```bash
+ls -la ~/.config/google-chrome/*/Cookies
+```
+
+**Antes de extraer, el navegador tiene que volcar sus cookies a disco.** Chrome
+las mantiene en memoria y las escribe cada tanto, así que con Chrome abierto se
+lee una copia vieja — que es de dónde salen las cookies "muertas" que en
+realidad sólo estaban desactualizadas. La secuencia que funciona: abrir
+`gemini.google.com`, esperar a que cargue, **cerrar el navegador por completo**,
+y recién entonces correr el script. No hace falta mantenerlo cerrado después.
+
+Entrá antes a `gemini.google.com` en el navegador. El script extrae las cookies,
+**las valida contra Google antes de escribir nada**, y sólo entonces actualiza
+el `.env` (chmod 600). Los valores nunca se imprimen. Después:
+`systemctl --user restart aigateway`.
+
+En Chrome bajo Linux hay que correrlo desde la terminal del escritorio, con el
+llavero desbloqueado — por SSH no puede descifrar las cookies.
+
+> **Dos trampas más, aprendidas rompiéndolo.**
+>
+> **1. Cada `init()` abre una sesión nueva contra Google.** La primera versión
+> de la sonda forzaba cliente nuevo en cada chequeo, para que uno viejo no diera
+> por buena una sesión muerta. Resultado medido en el caché de la librería: **11
+> sesiones autenticadas en hora y media**, misma cuenta, desde un servidor — y
+> la cuenta terminó invalidada. La sonda que vigilaba la sesión la estaba
+> matando. Ahora reutiliza el cliente vivo y refresca el estado con
+> `_fetch_user_status()`. Hay test de regresión.
+>
+> **2. El caché de cookies rotadas iba a `/tmp`.** Ahí es donde la librería
+> guarda las cookies YA refrescadas, y `systemd-tmpfiles` vacía `/tmp` en cada
+> arranque. El ciclo se cierra solo: reiniciás la máquina, se pierden las
+> cookies frescas, se vuelve a la semilla del `.env` —que lleva días
+> envejeciendo— y la sesión muere. Se persiste vía
+> `GEMINI_WEB_COOKIE_CACHE_DIR` (por defecto
+> `~/.proxima-gateway/gemini-web-cache`, chmod 700).
+>
+> **Cuidado con una trampa de la librería.** `GeminiClient.init()` **no falla**
+> con cookies inválidas: intenta, en orden, su caché en disco, las cookies que
+> le pasás, y las del navegador local. Con dos cookies basura devolvió éxito.
+> Por eso tanto el backend como la sonda exigen además que `access_token` no
+> esté vacío: sin eso, el chequeo diría "viva" para siempre y el aviso de
+> expiración no llegaría nunca. Hay test de regresión.
+
+#### Cuánta cuota aguanta una Codex Plus
+
+Medido, no estimado. La cuota se lee en los `X-Codex-*` que el panel de
+CLIProxyAPI guarda por credencial (`model_quotas` en
+`GET /v0/management/auth-files`):
+
+- La ventana es de **300 minutos** (5 h) y es **rolling**, no diaria.
+- El pool es **compartido entre modelos**: `gpt-5.4-mini`, `gpt-image-2` y
+  `gpt-image-1.5` se movieron juntos. Gastar en texto reduce lo que queda para
+  imagen.
+- **3 ediciones consecutivas subieron el uso 1 punto** (19% → 20%). Como el
+  porcentaje es entero, una llamada cuesta entre 0.17% y 0.67%: la capacidad de
+  una ventana está entre **~150 y ~600 imágenes**.
+
+Con el extremo pesimista (150 por ventana ≈ 700/día) sobra para volúmenes de
+500–5.000 imágenes/mes, que son ~35 por ventana. El límite que importa no es el
+mensual sino la **ráfaga**: un lote grande de golpe puede agotar la ventana y
+dejar sin texto al resto del gateway durante horas.
+
+Estos números salen de UNA cuenta y de una tanda corta. Vuelve a medirlos antes
+de comprometer un pipeline de producción — el procedimiento es el de arriba:
+leer el porcentaje, hacer N llamadas, volver a leerlo.
+
+Desde el SDK:
+
+```python
+from proxima_llm import SyncGateway
+
+with SyncGateway("http://192.168.1.12:8000", api_key=CLAVE, project="mi-tienda") as gw:
+    out = gw.image_edit("sobre mesa de madera, luz de mañana", "producto.png")
+    print(out.model, len(out.images))   # out.images[0].url es un data URI
+```
+
+`image_edit` acepta una ruta, bytes, o `(nombre, bytes)` — y una lista de
+cualquiera de las tres para varias referencias.
+
 ### Streaming
 
 ```json
@@ -1002,12 +1229,40 @@ curl -H "Authorization: Bearer $CLAVE" http://localhost:8000/api/v1/jobs/6b0686c
 Los artefactos se sirven con URL firmada de MinIO. El job de arriba deja un
 `image/jpeg` de ~440 KB.
 
+Para **editar desde una foto** en lote, sube primero la imagen y referencia su
+clave — no viaja en el payload:
+
+```bash
+# 1. subir la foto → devuelve {"storage_key": "uploads/<cliente>/<id>/producto.png", ...}
+curl -X POST http://localhost:8000/api/v1/uploads \
+  -H "Authorization: Bearer $CLAVE" -F "file=@producto.png"
+
+# 2. encolar la edición con esa storage_key
+curl -X POST http://localhost:8000/api/v1/jobs \
+  -H "Authorization: Bearer $CLAVE" -H "Content-Type: application/json" \
+  -d '{
+    "type": "image_edit",
+    "provider": "cliproxy",
+    "model": "gpt-image-2",
+    "input": {
+      "prompt": "sobre una mesa de madera rústica, luz de mañana",
+      "image_key": "uploads/<cliente>/<id>/producto.png"
+    }
+  }'
+```
+
+El `storage_key` que devuelve el upload es lo que va en `image_key` — la misma
+clave que usa el provider local para img2img, a
+propósito: el mismo payload sirve lo sirva quien lo sirva. Para varias
+referencias en una petición, añade `image_keys: ["uploads/fondo.png", ...]`.
+
 ### Tipos de job y qué está disponible hoy
 
 | Tipo | Provider | Estado |
 |---|---|---|
 | `text_generation` | `cliproxy` (cloud) · `local_llm` (Ollama) | ✅ verificado |
 | `image_generation` | `cliproxy` | ✅ verificado, con artefacto en MinIO |
+| `image_edit` | `cliproxy` (cloud) · `diffusers` (local) | ✅ verificado por `cliproxy`; la vía local necesita torch y VRAM |
 | `text_embedding` | `local_llm` (Ollama) | disponible, sin verificar — para embeddings usa mejor `POST /v1/embeddings` |
 | `video_assembly` | `video_editor` (moviepy) | disponible, sin verificar |
 | `autonomous_mission` | `orchestrator` (CrewAI) | disponible, sin verificar |
@@ -1125,6 +1380,45 @@ distintos, y un breaker por proceso obliga a cada uno a quemarse por su cuenta.
 
 Degrada hacia **dejar pasar**: sin Redis, nada se bloquea. Bloquear por no poder
 consultar el estado sería inventarse una caída.
+
+#### Se le cree al upstream cuando dice cuánto tarda en volver
+
+Esos tres valores son el camino por defecto. Cuando el upstream declara una
+espera, se usa **esa**: un 429 de Google trae `RetryInfo.retryDelay` y
+`quotaResetDelay`, y el circuito se abre por el tiempo real en vez de por 120 s.
+Topado a 24 h, para que un valor absurdo no saque un modelo de la cadena para
+siempre.
+
+Por qué hizo falta, medido: el 429 de la cuota de imagen decía *"reset after
+116h29m"* y el gateway reintentaba cada dos minutos algo muerto por cuatro días.
+
+Y hay un punto ciego que el contador de fallos no cubre solo:
+
+> **5 fallos en 60 s está pensado para chat.** Una ruta de imagen tarda 20-90 s
+> por llamada y se consume de a una, esperando cada resultado. Entre fallo y
+> fallo pasa más que la ventana, el contador se resetea, y **el circuito de un
+> modelo de imagen no se abre nunca por esta vía.** Verificado en producción:
+> tras una tarde entera de 429, los tres modelos de imagen seguían con
+> `failures: 0`.
+
+Leer el `retry_after` es lo que cubre ese hueco: **un solo** 429 con espera
+declarada abre el circuito, sin necesidad de juntar cinco.
+
+En la práctica el salto hacia un modelo muerto es barato de todos modos —medido,
+7 ms— porque CLIProxyAPI tiene su propio cooldown y rechaza al instante. El valor
+real de esto no es la latencia sino **dejar de golpear** un upstream que ya dijo
+que no.
+
+#### El caso especial: credenciales que no se curan solas
+
+`geminiweb/` se autentica con una cookie de sesión. Cuando muere, ninguna espera
+la revive: hace falta que una persona abra el navegador. Peor todavía, **cada
+reintento abre una sesión nueva contra Google**, y ese churn es lo que invalidó
+la cuenta la primera vez (11 sesiones en hora y media).
+
+Por eso un fallo de autenticación ahí abre el circuito **6 horas** de una vez, y
+el monitor de sesión lo **cierra en cuanto detecta que volvió** — así arreglarlo
+en cinco minutos no obliga a esperar las seis horas restantes.
 
 ### Watchdog
 
@@ -1368,10 +1662,77 @@ La ruta añade su capacidad: `cheap` en búsqueda web = barato **Y** con websear
 mapa no cubre esa capacidad (no se sondeó), el tier cae a la cadena normal de la ruta en
 vez de fallar — la intención se respeta hasta donde el mapa alcanza.
 
+Por eso los tiers **no repiten** la capacidad de la ruta en su `require`. Lo hacían
+(`require: [chat]`) y eso los dejaba inservibles fuera de las rutas de texto: un
+modelo de imagen tiene `chat: False` y quedaba filtrado de `fast` y de `cheap`.
+
+### Tiers en imagen: un gateway, varios flujos
+
+Cada sistema que consume tiene un flujo distinto y ninguno es "el correcto". El
+tier es cómo cada uno declara el suyo sin cablear nombres de modelo:
+
+| Flujo del sistema | Qué manda | Qué obtiene |
+|---|---|---|
+| Genera de a una y **espera** el resultado | `{"model": "fast"}` | el de menor latencia medida en imagen |
+| Lote o segundo plano | `{"model": "cheap"}` | el de menor precio **por imagen** |
+| Sin preferencia | nada | la cadena por defecto de `routing.yaml` |
+| Necesita uno concreto | `{"model": "gpt-image-2"}` | ese primero, **con la cadena detrás como red** |
+
+Las rutas de imagen se ordenan con **sus propias cifras**: la latencia medida
+generando una imagen (15-90 s) y el precio por unidad de `pricing.images`.
+Mezclarlas con las de chat ordenaría por algo que no aplica — una generación
+tarda dos órdenes de magnitud más que un turno de chat, y `gpt-image-2` no tiene
+tarifa por token, así que heredaría la de su familia y quedaría último por una
+cifra irrelevante.
+
+Un efecto que sale solo, sin cablearlo: `cheap` ordenado por precio da
+`gemini-3.1-flash-image` (0.03) → `nano-banana-web` (0.039) → `gpt-image-2`
+(0.04) — que es exactamente el orden que **preserva la ventana de la Codex
+Plus**, compartida con todo el texto del gateway. La política sale de los
+precios, no de una lista.
+
+`smart` no tiene orden curado para imagen todavía: la calidad no sale de una
+sonda. En rutas de imagen resuelve vacío y cae a la cadena normal, que es el
+comportamiento correcto mientras nadie haya hecho ese juicio.
+
+> **Los ids del mapa llevan su prefijo de backend.** Un tier resuelve a
+> `ollama/qwen2.5:7b` o `geminiweb/nano-banana-web`, no al nombre pelado: el
+> prefijo es lo que decide a qué backend va el candidato, y un id sin él se
+> rutea al cloud por defecto. El prober sondea con el id que el backend entiende
+> y guarda la ficha con el ruteable.
+
 Lo honesto: `cheap`/`fast` salen de medición pura y no envejecen. `smart` (y un futuro
 `coder`) dependen de un juicio de **calidad** que una sonda no da — se curan a mano o con
 [evals](#comparar-modelos-evals), y el prober sólo avisa cuando aparece un modelo sin
 clasificar.
+
+### Un sistema descubre esto por API, no leyendo el README
+
+```bash
+curl -H "Authorization: Bearer $CLAVE" http://192.168.1.12:8000/v1/capabilities
+```
+
+```json
+{
+  "routes": {
+    "image":      {"requires": "image", "endpoint": "POST /v1/images/generations"},
+    "image_edit": {"requires": "image", "endpoint": "POST /v1/images/edits"}
+  },
+  "tiers": {
+    "fast":  {"image": ["gpt-image-2", ...], "image_edit": ["gpt-image-2", ...]},
+    "cheap": {"image": [...], "image_edit": [...]}
+  }
+}
+```
+
+`routes` existe porque `image_edit` es un nombre interno del routing: lo que un
+consumidor necesita es **a qué endpoint mandar la petición**. Y los tiers se
+anuncian por ruta, no sólo para `chat` — estaban cableados a chat, y con eso un
+sistema que preguntaba "¿qué me das para imagen?" no veía nada aunque `fast` y
+`cheap` ya resolvieran cadenas de imagen.
+
+Una ruta que devuelve `[]` en un tier también es información: significa "acá ese
+tier cae a la cadena por defecto de `routing.yaml`".
 
 ## Descubrir qué ofrece el gateway (sin leer esto)
 

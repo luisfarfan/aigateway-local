@@ -120,6 +120,19 @@ class OllamaBackend:
             f"Ollama no genera imágenes (modelo {model!r}); el routing debe probar otro candidato"
         )
 
+    async def image_edit(
+        self,
+        prompt: str,
+        *,
+        images: list[Any],
+        model: str,
+        size: str | None = None,
+        quality: str | None = None,
+    ) -> LLMResult:
+        raise BackendCapabilityError(
+            f"Ollama no edita imágenes (modelo {model!r}); el routing debe probar otro candidato"
+        )
+
     @asynccontextmanager
     async def stream_chat(
         self,

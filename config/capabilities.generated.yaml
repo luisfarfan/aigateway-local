@@ -1,16 +1,5 @@
 version: 1
 models:
-  bge-m3:latest:
-    owned_by: ollama
-    family: local
-    hosted: local
-    capabilities:
-      chat: false
-      embeddings: true
-      image: false
-    chat_latency_s: 0.09
-    errors:
-      chat: 'ollama/v1/chat/completions → 400: "bge-m3:latest" does not support chat'
   claude-opus-4-6-thinking:
     owned_by: antigravity
     family: antigravity
@@ -22,13 +11,11 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 4.64
+    chat_latency_s: 3.87
+    image_latency_s: null
     errors:
       websearch: No hay ruta de websearch conocida para el modelo 'claude-opus-4-6-thinking'
         (antigravity)
-      image: '/v1/images/generations → 400: Model claude-opus-4-6-thinking is not
-        supported on /v1/images/generations or /v1/images/edits. Use gpt-image-1.5,
-        gpt-im'
   claude-sonnet-4-6:
     owned_by: antigravity
     family: antigravity
@@ -40,58 +27,26 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 2.34
+    chat_latency_s: 2.04
+    image_latency_s: null
     errors:
       vision: 'no acertó el color: ''**Roja**'''
       websearch: No hay ruta de websearch conocida para el modelo 'claude-sonnet-4-6'
         (antigravity)
-      image: '/v1/images/generations → 400: Model claude-sonnet-4-6 is not supported
-        on /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2, '
   codex-auto-review:
     owned_by: openai
     family: openai
     hosted: cloud
     capabilities:
-      chat: false
+      chat: true
+      tools: true
+      vision: true
       embeddings: false
+      websearch: true
       image: false
-    chat_latency_s: 1.74
-    errors:
-      chat: '/v1/chat/completions → 429: The usage limit has been reached'
-      image: '/v1/images/generations → 400: Model codex-auto-review is not supported
-        on /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2, '
-  deepseek-coder:6.7b:
-    owned_by: ollama
-    family: local
-    hosted: local
-    capabilities:
-      chat: true
-      tools: false
-      vision: false
-      embeddings: true
-      websearch: false
-      image: false
-    chat_latency_s: 5.04
-    errors:
-      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:6.7b
-        does not support tools'
-      vision: 'no acertó el color: ''Lo siento, pero como una I'''
-  deepseek-coder:latest:
-    owned_by: ollama
-    family: local
-    hosted: local
-    capabilities:
-      chat: true
-      tools: false
-      vision: false
-      embeddings: true
-      websearch: false
-      image: false
-    chat_latency_s: 1.94
-    errors:
-      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:latest
-        does not support tools'
-      vision: 'no acertó el color: ''Por supuesto, como buen'''
+    chat_latency_s: 2.68
+    image_latency_s: null
+    errors: {}
   gemini-3-flash:
     owned_by: antigravity
     family: antigravity
@@ -103,38 +58,22 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 1.84
-    errors:
-      image: respondió sin imagen
-  gemini-3-flash-agent:
-    owned_by: antigravity
-    family: antigravity
-    hosted: cloud
-    capabilities:
-      chat: true
-      tools: true
-      vision: true
-      embeddings: false
-      websearch: true
-      image: false
-    chat_latency_s: 1.77
-    errors:
-      image: respondió sin imagen
+    chat_latency_s: 2.03
+    image_latency_s: null
+    errors: {}
   gemini-3.1-flash-image:
     owned_by: antigravity
     family: antigravity
     hosted: cloud
     capabilities:
-      chat: true
-      tools: true
-      vision: true
+      chat: false
       embeddings: false
-      websearch: true
       image: false
-    chat_latency_s: 1.91
+    chat_latency_s: 2.41
+    image_latency_s: null
     errors:
-      image: 'no probado (/v1/chat/completions → 429: You have exhausted your capacity
-        on this model. Your); se conserva previo'
+      chat: '/v1/chat/completions → 429: You have exhausted your capacity on this
+        model. Your quota will reset after 96h41m2s.'
   gemini-3.1-flash-lite:
     owned_by: antigravity
     family: antigravity
@@ -146,9 +85,9 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 1.5
-    errors:
-      image: respondió sin imagen
+    chat_latency_s: 1.56
+    image_latency_s: null
+    errors: {}
   gemini-3.1-pro-low:
     owned_by: antigravity
     family: antigravity
@@ -160,37 +99,9 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 4.76
-    errors:
-      image: respondió sin imagen
-  gemini-3.5-flash-extra-low:
-    owned_by: antigravity
-    family: antigravity
-    hosted: cloud
-    capabilities:
-      chat: true
-      tools: true
-      vision: true
-      embeddings: false
-      websearch: true
-      image: false
-    chat_latency_s: 1.59
-    errors:
-      image: respondió sin imagen
-  gemini-3.5-flash-low:
-    owned_by: antigravity
-    family: antigravity
-    hosted: cloud
-    capabilities:
-      chat: true
-      tools: true
-      vision: true
-      embeddings: false
-      websearch: true
-      image: false
-    chat_latency_s: 1.87
-    errors:
-      image: respondió sin imagen
+    chat_latency_s: 3.55
+    image_latency_s: null
+    errors: {}
   gemini-3.6-flash-high:
     owned_by: antigravity
     family: antigravity
@@ -202,9 +113,9 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 2.07
-    errors:
-      image: respondió sin imagen
+    chat_latency_s: 3.02
+    image_latency_s: null
+    errors: {}
   gemini-3.7-flash-high:
     owned_by: antigravity
     family: antigravity
@@ -216,9 +127,9 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 2.25
-    errors:
-      image: respondió sin imagen
+    chat_latency_s: 2.65
+    image_latency_s: null
+    errors: {}
   gemini-pro-agent:
     owned_by: antigravity
     family: antigravity
@@ -230,96 +141,122 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 3.52
-    errors:
-      image: respondió sin imagen
-  gemma:7b:
-    owned_by: ollama
-    family: local
-    hosted: local
-    capabilities:
-      chat: true
-      tools: false
-      vision: false
-      embeddings: true
-      websearch: false
-      image: false
-    chat_latency_s: 6.03
-    errors:
-      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/gemma:7b
-        does not support tools'
-      vision: 'no acertó el color: ''Negra.\n\nLa imagen es de'''
-  glm-4.7-flash:latest:
-    owned_by: ollama
-    family: local
-    hosted: local
+    chat_latency_s: 7.42
+    image_latency_s: null
+    errors: {}
+  geminiweb/nano-banana-web:
+    owned_by: gemini_web
+    family: unknown
+    hosted: cloud
     capabilities:
       chat: true
       tools: false
       vision: false
       embeddings: false
       websearch: false
-      image: false
-    chat_latency_s: 11.95
+    chat_latency_s: 7.47
+    image_latency_s: null
     errors:
-      vision: 'no acertó el color: '''''
-      embeddings: 'ollama/v1/embeddings → 501: this model does not support embeddings'
+      tools: la app web de Gemini no soporta tools ni salida estructurada; el routing
+        debe probar otro candidato
+      vision: 'no acertó el color: ''Azul.'''
+  gpt-5.3-codex-spark:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: false
+      embeddings: false
+      image: false
+    chat_latency_s: 0.81
+    image_latency_s: null
+    errors:
+      chat: /v1/chat/completions → 400
+  gpt-5.4:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: false
+      embeddings: false
+      websearch: true
+      image: false
+    chat_latency_s: 1.71
+    image_latency_s: null
+    errors:
+      vision: 'no acertó el color: ''Roja'''
   gpt-5.4-mini:
     owned_by: openai
     family: openai
     hosted: cloud
     capabilities:
-      chat: false
+      chat: true
+      tools: true
+      vision: true
       embeddings: false
+      websearch: true
       image: false
-    chat_latency_s: 0.0
-    errors:
-      chat: '/v1/chat/completions → 429: All credentials for model gpt-5.4-mini are
-        cooling down via provider codex'
-      image: '/v1/images/generations → 400: Model gpt-5.4-mini is not supported on
-        /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2,
-        grok-'
+    chat_latency_s: 1.34
+    image_latency_s: null
+    errors: {}
   gpt-5.5:
     owned_by: openai
     family: openai
     hosted: cloud
     capabilities:
-      chat: false
+      chat: true
+      tools: true
+      vision: true
       embeddings: false
+      websearch: true
       image: false
-    chat_latency_s: 1.02
-    errors:
-      chat: '/v1/chat/completions → 429: The usage limit has been reached'
-      image: '/v1/images/generations → 400: Model gpt-5.5 is not supported on /v1/images/generations
-        or /v1/images/edits. Use gpt-image-1.5, gpt-image-2, grok-imagi'
+    chat_latency_s: 2.96
+    image_latency_s: null
+    errors: {}
   gpt-5.6-luna:
     owned_by: openai
     family: openai
     hosted: cloud
     capabilities:
-      chat: false
+      chat: true
+      tools: true
+      vision: true
       embeddings: false
+      websearch: true
       image: false
-    chat_latency_s: 0.99
-    errors:
-      chat: '/v1/chat/completions → 429: The usage limit has been reached'
-      image: '/v1/images/generations → 400: Model gpt-5.6-luna is not supported on
-        /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2,
-        grok-'
+    chat_latency_s: 3.76
+    image_latency_s: null
+    errors: {}
+  gpt-5.6-sol:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+      websearch: true
+      image: false
+    chat_latency_s: 1.73
+    image_latency_s: null
+    errors: {}
   gpt-5.6-terra:
     owned_by: openai
     family: openai
     hosted: cloud
     capabilities:
-      chat: false
+      chat: true
+      tools: true
+      vision: true
       embeddings: false
+      websearch: true
       image: false
-    chat_latency_s: 0.98
-    errors:
-      chat: '/v1/chat/completions → 429: The usage limit has been reached'
-      image: '/v1/images/generations → 400: Model gpt-5.6-terra is not supported on
-        /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2,
-        grok'
+    chat_latency_s: 3.22
+    image_latency_s: null
+    errors: {}
   gpt-image-1.5:
     owned_by: openai
     family: openai
@@ -327,13 +264,12 @@ models:
     capabilities:
       chat: false
       embeddings: false
-      image: false
+      image: true
     chat_latency_s: 0.0
+    image_latency_s: null
     errors:
       chat: '/v1/chat/completions → 503: model gpt-image-1.5 is only supported on
         /v1/images/generations and /v1/images/edits'
-      image: '/v1/images/generations → 503: auth_not_found: no auth available (providers=codex,
-        model=gpt-image-1.5)'
   gpt-image-2:
     owned_by: openai
     family: openai
@@ -341,13 +277,12 @@ models:
     capabilities:
       chat: false
       embeddings: false
-      image: false
+      image: true
     chat_latency_s: 0.0
+    image_latency_s: null
     errors:
       chat: '/v1/chat/completions → 503: model gpt-image-2 is only supported on /v1/images/generations
         and /v1/images/edits'
-      image: '/v1/images/generations → 503: auth_not_found: no auth available (providers=codex,
-        model=gpt-image-2)'
   gpt-oss-120b-medium:
     owned_by: antigravity
     family: antigravity
@@ -359,29 +294,26 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 1.58
+    chat_latency_s: 2.11
+    image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''No puedo ver la imagen, así que no puedo decirte
-        de qué colo'''
+      vision: 'no acertó el color: ''No tengo la capacidad de ver imágenes, por lo
+        que no puedo d'''
       websearch: No hay ruta de websearch conocida para el modelo 'gpt-oss-120b-medium'
         (antigravity)
-      image: '/v1/images/generations → 400: Model gpt-oss-120b-medium is not supported
-        on /v1/images/generations or /v1/images/edits. Use gpt-image-1.5, gpt-image-2'
-  llama3.1:latest:
+  ollama/bge-m3:latest:
     owned_by: ollama
     family: local
     hosted: local
     capabilities:
-      chat: true
-      tools: false
-      vision: false
+      chat: false
       embeddings: true
-      websearch: false
       image: false
-    chat_latency_s: 5.64
+    chat_latency_s: 0.08
+    image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''No puedo ver la imagen, ¿pod'''
-  llama3:latest:
+      chat: 'ollama/v1/chat/completions → 400: "bge-m3:latest" does not support chat'
+  ollama/deepseek-coder:6.7b:
     owned_by: ollama
     family: local
     hosted: local
@@ -392,12 +324,95 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 5.3
+    chat_latency_s: 5.91
+    image_latency_s: null
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:6.7b
+        does not support tools'
+      vision: 'no acertó el color: ''Lo siento, pero como un model'''
+  ollama/deepseek-coder:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+      websearch: false
+      image: false
+    chat_latency_s: 1.65
+    image_latency_s: null
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:latest
+        does not support tools'
+      vision: 'no acertó el color: ''La imagen no especifica un color.'''
+  ollama/gemma:7b:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+      websearch: false
+      image: false
+    chat_latency_s: 6.24
+    image_latency_s: null
+    errors:
+      tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/gemma:7b
+        does not support tools'
+      vision: 'no acertó el color: ''Negra.\n\nLa imagen es de'''
+  ollama/glm-4.7-flash:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: false
+      websearch: false
+      image: false
+    chat_latency_s: 13.92
+    image_latency_s: null
+    errors:
+      vision: 'no acertó el color: '''''
+      embeddings: 'ollama/v1/embeddings → 501: this model does not support embeddings'
+  ollama/llama3.1:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+      websearch: false
+      image: false
+    chat_latency_s: 11.16
+    image_latency_s: null
+    errors:
+      vision: 'no acertó el color: ''Blaque.'''
+  ollama/llama3:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+      websearch: false
+      image: false
+    chat_latency_s: 6.8
+    image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/llama3:latest
         does not support tools'
       vision: 'no acertó el color: ''Azul.'''
-  mistral:latest:
+  ollama/mistral:latest:
     owned_by: ollama
     family: local
     hosted: local
@@ -408,10 +423,11 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.0
+    chat_latency_s: 4.24
+    image_latency_s: null
     errors:
-      vision: 'no acertó el color: '' A partir de la imagen propor'''
-  nomic-embed-text:latest:
+      vision: 'no acertó el color: '' La imagen, [img-0'''
+  ollama/nomic-embed-text:latest:
     owned_by: ollama
     family: local
     hosted: local
@@ -420,10 +436,11 @@ models:
       embeddings: true
       image: false
     chat_latency_s: 0.01
+    image_latency_s: null
     errors:
       chat: 'ollama/v1/chat/completions → 400: "nomic-embed-text:latest" does not
         support chat'
-  phi3:mini:
+  ollama/phi3:mini:
     owned_by: ollama
     family: local
     hosted: local
@@ -434,12 +451,13 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 3.99
+    chat_latency_s: 4.83
+    image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/phi3:mini
         does not support tools'
-      vision: 'no acertó el color: ''Azul'''
-  qwen2.5-coder:7b:
+      vision: 'no acertó el color: ''Amarillo'''
+  ollama/qwen2.5-coder:7b:
     owned_by: ollama
     family: local
     hosted: local
@@ -450,9 +468,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 3.03
+    chat_latency_s: 2.91
+    image_latency_s: null
     errors: {}
-  qwen2.5-coder:latest:
+  ollama/qwen2.5-coder:latest:
     owned_by: ollama
     family: local
     hosted: local
@@ -463,24 +482,11 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 7.84
-    errors:
-      vision: 'no acertó el color: ''Marrón'''
-  qwen2.5:3b:
-    owned_by: ollama
-    family: local
-    hosted: local
-    capabilities:
-      chat: true
-      tools: false
-      vision: false
-      embeddings: true
-      websearch: false
-      image: false
-    chat_latency_s: 4.02
+    chat_latency_s: 8.6
+    image_latency_s: null
     errors:
       vision: 'no acertó el color: ''Verde'''
-  qwen2.5:7b:
+  ollama/qwen2.5:3b:
     owned_by: ollama
     family: local
     hosted: local
@@ -491,10 +497,11 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.98
+    chat_latency_s: 9.12
+    image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Sin poder visualizar la imagen, no'''
-  qwen2.5:latest:
+      vision: 'no acertó el color: ''Azul'''
+  ollama/qwen2.5:7b:
     owned_by: ollama
     family: local
     hosted: local
@@ -505,10 +512,26 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 5.79
+    chat_latency_s: 6.12
+    image_latency_s: null
     errors:
       vision: 'no acertó el color: ''Lo siento, pero como una intelig'''
-  qwen3-embedding:0.6b:
+  ollama/qwen2.5:latest:
+    owned_by: ollama
+    family: local
+    hosted: local
+    capabilities:
+      chat: true
+      tools: false
+      vision: false
+      embeddings: true
+      websearch: false
+      image: false
+    chat_latency_s: 6.42
+    image_latency_s: null
+    errors:
+      vision: 'no acertó el color: ''Verde'''
+  ollama/qwen3-embedding:0.6b:
     owned_by: ollama
     family: local
     hosted: local
@@ -517,6 +540,7 @@ models:
       embeddings: true
       image: false
     chat_latency_s: 0.06
+    image_latency_s: null
     errors:
       chat: 'ollama/v1/chat/completions → 400: "qwen3-embedding:0.6b" does not support
         chat'

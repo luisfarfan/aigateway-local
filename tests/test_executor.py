@@ -231,3 +231,83 @@ async def test_persist_artifact_creates_record(db_session):
     assert artifact.size_bytes == 1024
     assert artifact.public_url == "http://minio/test.png"
     publisher.publish.assert_called_once()
+
+
+# ─── Espera declarada por el upstream ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_un_429_con_retry_abre_el_circuito_por_ese_tiempo():
+    """Medido: el 429 de Gemini dice cuánto tarda en volver (hasta 116 h) y el
+    breaker abría 120 s fijos. Peor todavía, el contador de fallos —5 en 60 s—
+    no se llena nunca en una ruta de imagen, donde cada llamada tarda 20-90 s y
+    se usa de a una. Sin leer ese dato, el circuito no se abre JAMÁS y el modelo
+    muerto se reintenta en cada petición durante días."""
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+    from src.modules.routing.config import RoutingTable
+    from src.modules.routing.executor import run_with_fallback
+
+    abiertos: list[tuple[str, int]] = []
+    fallos: list[str] = []
+
+    class BreakerEspia:
+        async def is_open(self, model):
+            return False
+
+        async def record_failure(self, model):
+            fallos.append(model)
+
+        async def record_success(self, model):
+            pass
+
+        async def open(self, model, seconds, *, reason):
+            abiertos.append((model, seconds))
+
+    async def call(model):
+        if model == "muerto":
+            raise CliproxyRetryableError("429", status_code=429, retry_after_s=7200)
+        return "ok"
+
+    tabla = RoutingTable(routes={"image": ["muerto", "vivo"]})
+    resultado = await run_with_fallback(call, route="image", table=tabla, breaker=BreakerEspia())
+
+    assert resultado.value == "ok" and resultado.model == "vivo"
+    assert abiertos == [("muerto", 7200)]
+    # No se cuenta como fallo suelto: se abrió directo, que es más fuerte.
+    assert fallos == []
+
+
+@pytest.mark.asyncio
+async def test_sin_retry_declarado_se_sigue_contando_como_antes():
+    """El comportamiento viejo tiene que sobrevivir para todo lo que no declara
+    espera — que es la mayoría de los fallos."""
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+    from src.modules.routing.config import RoutingTable
+    from src.modules.routing.executor import run_with_fallback
+
+    abiertos: list = []
+    fallos: list[str] = []
+
+    class BreakerEspia:
+        async def is_open(self, model):
+            return False
+
+        async def record_failure(self, model):
+            fallos.append(model)
+
+        async def record_success(self, model):
+            pass
+
+        async def open(self, model, seconds, *, reason):
+            abiertos.append((model, seconds))
+
+    async def call(model):
+        if model == "muerto":
+            raise CliproxyRetryableError("503", status_code=503)
+        return "ok"
+
+    tabla = RoutingTable(routes={"image": ["muerto", "vivo"]})
+    await run_with_fallback(call, route="image", table=tabla, breaker=BreakerEspia())
+
+    assert fallos == ["muerto"]
+    assert abiertos == []

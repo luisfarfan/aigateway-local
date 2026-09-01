@@ -35,9 +35,55 @@ routes:
     - gemini-3-flash
     - gpt-5.4-mini
     - ollama/qwen2.5:7b
+  # Texto -> imagen. El orden gasta primero lo gratis y deja lo medido al final,
+  # que es al revés que en `image_edit`, y a propósito: acá NO hay una foto de
+  # producto que preservar. Sin ese requisito, la fidelidad deja de decidir y
+  # decide el costo.
   image:
+    # Gratis, pero da para poco: medido, la cuota se repone a goteo y alcanza
+    # para ~1 imagen antes de volver a 429. Va primero justamente por eso —
+    # aprovecharla cuando gotea no cuesta nada, y el breaker absorbe el fallo
+    # (medido: saltar el circuito abierto es más rápido que la varianza de una
+    # generación, 17s contra 23s).
     - gemini-3.1-flash-image
+    # También va contra una suscripción, y NO consume la ventana de 5 h de la
+    # Codex Plus — que se comparte con el texto de todo el gateway. Preferirlo
+    # acá es reservar esa ventana para `image_edit`, que es donde hace falta.
+    - geminiweb/nano-banana-web
+    # El que siempre responde. Último en esta ruta por costo de oportunidad, no
+    # por calidad: es el mejor, pero su cuota vale más en la ruta de edición.
     - gpt-image-2
+  # Edición desde una foto (image-to-image). Cadena propia y no la de `image`
+  # porque el orden se invierte, y por una razón medida, no estética:
+  #
+  #   gpt-image-2 va primero porque está VERIFICADO contra la instancia. Entra
+  #   por `/v1/images/edits`, devuelve 200, y preserva la identidad del producto
+  #   de entrada — que es el requisito entero de un catálogo de ecommerce.
+  #
+  #   gemini-3.1-flash-image queda de segundo y SIN VERIFICAR: su cuota estaba
+  #   agotada al cablear esto (429, reset 2026-09-05), así que la vía de edición
+  #   por bloques `image_url` en el chat está implementada pero no medida. Si
+  #   falla, el breaker lo saca; no encabeza la cadena por eso.
+  # Foto -> imagen. Acá SÍ hay un producto que preservar, y eso manda sobre el
+  # costo: una imagen barata que no es del producto que vendés no sirve de nada.
+  image_edit:
+    # Único verificado conservando la identidad del producto de entrada.
+    - gpt-image-2
+    - gemini-3.1-flash-image
+    # Último recurso, y sólo si está encendido (apagado por defecto). Entra por
+    # la app web de Gemini con una cookie de sesión, no por API. Va al fondo por
+    # tres razones medidas, no por gusto:
+    #
+    #   1. Fidelidad menor. Editando la MISMA foto, gpt-image-2 conservó el
+    #      producto; esta vía lo reinterpretó (asa y proporción distintas). Para
+    #      un catálogo eso es el fallo que no se puede tener.
+    #   2. Es ingeniería inversa: sin contrato de API, se rompe cuando Google
+    #      cambie la app web, sin aviso.
+    #   3. La credencial es la sesión entera de una cuenta de Google.
+    #
+    # Existe porque sin él la ruta no tiene fondo: antigravity choca contra un
+    # tope semanal y gpt-image-2 depende de que la Codex Plus siga viva.
+    - geminiweb/nano-banana-web
   embeddings:
     # Sólo local: CLIProxyAPI no expone `/v1/embeddings` (comprobado contra la
     # instancia, devuelve vacío). Y es donde más sentido tiene: para un RAG se
@@ -86,10 +132,27 @@ watchdog:
   # reales a través del breaker, no por sondeo.
   skip_routes:
     - image
+    # Misma razón que `image`: sondear una ruta de imagen con una llamada de
+    # chat marca vivo lo que está muerto y muerto lo que está vivo.
+    - image_edit
     # Un modelo de embeddings tampoco responde a una llamada de chat.
     - embeddings
 
+# Estos tres valores son el camino POR DEFECTO, el que se usa cuando el upstream
+# no dice nada. Cuando sí lo dice —un 429 de Google trae `RetryInfo.retryDelay`
+# y `quotaResetDelay`— se le cree a él y el circuito se abre por ese tiempo
+# real, topado a 24 h (`errors.MAX_RETRY_AFTER_S`).
+#
+# Por qué importa, medido: el 429 de la cuota de imagen decía "reset after
+# 116h29m" y acá se abría 120 s. Se reintentaba cada dos minutos algo muerto por
+# cuatro días.
+#
+# Y el contador de fallos tiene un punto ciego que este default no cubre: 5
+# fallos en 60 s está pensado para chat, que es rápido y de alto volumen. Una
+# ruta de imagen tarda 20-90 s por llamada y se consume de a una, así que nunca
+# junta cinco dentro de la ventana — su circuito no se abriría jamás por esta
+# vía. Leer el `retry_after` es lo que la cubre.
 circuit_breaker:
   window_s: 60          # ventana en la que se cuentan los fallos
   failure_threshold: 5  # fallos en la ventana que abren el circuito
-  open_for_s: 120       # cuánto queda cerrado el paso antes de reintentar
+  open_for_s: 120       # cuánto queda cerrado el paso, si el upstream no dice otra cosa

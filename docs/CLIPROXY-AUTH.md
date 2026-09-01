@@ -22,6 +22,30 @@ El túnel resuelve las dos cosas a la vez: hace que los puertos del servidor apa
 como `localhost` en la MacBook. Efecto secundario bueno — nada queda expuesto a la LAN,
 todos los puertos están bind a `127.0.0.1` en el servidor.
 
+## Atajo: importar una sesión ya logueada (sin túnel)
+
+El túnel de arriba sólo hace falta para completar un OAuth **nuevo**. Si la otra
+PC ya tiene el Codex CLI logueado, ese OAuth ya ocurrió y los tokens están en
+`~/.codex/auth.json`. Se pueden subir directamente:
+
+```bash
+# EN LA OTRA PC (no necesita el repo: sólo stdlib)
+python3 import_codex_auth.py --host 192.168.1.12:8417 --key <secret-key>
+```
+
+`scripts/import_codex_auth.py` traduce la forma del Codex CLI (tokens anidados
+bajo `tokens`) a la que CLIProxyAPI guarda en disco (planos, con `type: codex`)
+y la sube por `POST /v0/management/auth-files?name=<archivo>.json`. Con
+`--dry-run` muestra qué subiría sin subirlo.
+
+Para esto el panel tiene que ser alcanzable desde la LAN — por eso el puerto
+8417 está bind a `0.0.0.0` en `docker-compose.yml`, y sólo ése. Los puertos de
+callback siguen en `127.0.0.1`: no sirven de nada desde afuera, porque el
+`redirect_uri` apunta al `localhost` del navegador.
+
+Esta vía no existe para un proveedor cuya sesión no esté ya en algún lado. Para
+eso, el túnel.
+
 ## Mapa de puertos
 
 Los puertos **dentro** del contenedor son fijos (hardcodeados en el binario). Los del

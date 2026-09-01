@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import mimetypes
 from typing import Any
 from uuid import UUID
 
@@ -40,11 +41,19 @@ from src.modules.providers.cliproxy.errors import (
     CliproxyRetryableError,
     CliproxyTransportError,
 )
-from src.modules.providers.cliproxy.translate import LLMResult
+from src.modules.providers.cliproxy.translate import InputImage, LLMResult
 
 log = structlog.get_logger(__name__)
 
-_SUPPORTED_JOB_TYPES = [JobType.TEXT_GENERATION, JobType.IMAGE_GENERATION]
+_SUPPORTED_JOB_TYPES = [
+    JobType.TEXT_GENERATION,
+    JobType.IMAGE_GENERATION,
+    # Editar desde una foto también sale por acá y no sólo por diffusers: el
+    # provider local necesita VRAM que esta máquina no tiene para calidad de
+    # catálogo, y este no toca la GPU. Es además la puerta que sirve para lotes,
+    # que es como se procesa un catálogo entero.
+    JobType.IMAGE_EDIT,
+]
 
 # Sin GPU de por medio, el techo real es la cuota de arriba. Se deja holgado
 # para no estrangular de este lado algo que el proveedor sí aguanta.
@@ -203,6 +212,18 @@ class CliproxyProvider(BaseProvider):
                 quality=payload.get("quality"),
             )
 
+        if context.job_type is JobType.IMAGE_EDIT:
+            await context.on_progress(10.0, "Descargando imagen de entrada")
+            images = await self._input_images(payload)
+            await context.on_progress(20.0, "Editando imagen")
+            return await self._client.image_edit(
+                _require_prompt(payload),
+                images=images,
+                model=model,
+                size=payload.get("size"),
+                quality=payload.get("quality"),
+            )
+
         messages = _messages_from(payload)
         max_tokens = int(payload.get("max_tokens") or 4096)
         if payload.get("websearch"):
@@ -211,6 +232,37 @@ class CliproxyProvider(BaseProvider):
 
         await context.on_progress(20.0, "Generando texto")
         return await self._client.chat(messages, model=model, max_tokens=max_tokens)
+
+    @staticmethod
+    async def _input_images(payload: dict[str, Any]) -> list[InputImage]:
+        """Baja de MinIO las fotos de entrada del job.
+
+        Se acepta `image_key` (una) y `image_keys` (varias) porque el upstream
+        admite varias referencias en la misma petición —producto y fondo de
+        marca, p. ej.—. `image_key` es la clave que ya usa el provider local
+        para img2img: misma convención, para que un cliente no tenga que cambiar
+        el payload según a quién le toque el job.
+        """
+        keys = [k for k in [payload.get("image_key")] if k]
+        keys += [k for k in (payload.get("image_keys") or []) if k]
+        if not keys:
+            raise ValueError("image_edit necesita `image_key` o `image_keys`")
+
+        images: list[InputImage] = []
+        for key in keys:
+            content = await storage.download(key)
+            name = str(key).rsplit("/", 1)[-1] or "image.png"
+            guessed, _ = mimetypes.guess_type(name)
+            images.append(
+                InputImage(
+                    content=content,
+                    filename=name,
+                    # El upstream mira el tipo declarado, no los bytes: un JPEG
+                    # anunciado como PNG lo rechaza.
+                    content_type=guessed if (guessed or "").startswith("image/") else "image/png",
+                )
+            )
+        return images
 
     # ── Artefactos ────────────────────────────────────────────────────────────
 

@@ -65,7 +65,21 @@ async def main(argv: list[str]) -> int:
     local = (
         OllamaBackend(base_url=settings.ollama_base_url) if settings.enable_backend_ollama else None
     )
-    registry = BackendRegistry(cloud=cloud, local=local)
+    # El backend de la app web de Gemini también se sondea, si está activo: sin
+    # estar en el mapa no existe para los tiers, y `fast`/`cheap` no podrían
+    # elegirlo por más que esté en las cadenas de `routing.yaml`.
+    gemini_web = None
+    if settings.enable_backend_gemini_web and settings.gemini_web_secure_1psid:
+        from src.modules.backends.gemini_web import GeminiWebBackend
+
+        gemini_web = GeminiWebBackend(
+            secure_1psid=settings.gemini_web_secure_1psid,
+            secure_1psidts=settings.gemini_web_secure_1psidts,
+            timeout_s=settings.gemini_web_timeout_s,
+            cookie_cache_dir=str(Path(settings.gemini_web_cookie_cache_dir).expanduser()),
+        )
+
+    registry = BackendRegistry(cloud=cloud, local=local, gemini_web=gemini_web)
 
     expensive = set()
     if args.websearch:

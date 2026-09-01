@@ -107,6 +107,10 @@ class ModelCard:
     hosted: str  # cloud | local
     capabilities: dict[str, bool] = field(default_factory=dict)
     chat_latency_s: float | None = None
+    # La sonda de imagen ya cronometra; guardarlo es lo que permite que el tier
+    # `fast` ordene una ruta de imagen por su latencia real (15-90 s) en vez de
+    # por la de chat, que es otro orden de magnitud y otro ranking.
+    image_latency_s: float | None = None
     errors: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -139,14 +143,23 @@ async def probe_model(
     hosted: str,
     include_expensive: frozenset[str] = frozenset(),
     previous_card: dict[str, Any] | None = None,
+    chain_id: str | None = None,
 ) -> ModelCard:
-    """Prueba un modelo capacidad por capacidad. `model` ya sin prefijo de backend."""
+    """Prueba un modelo capacidad por capacidad.
+
+    `model` va sin prefijo de backend, porque es lo que el backend entiende.
+    `chain_id` es cómo se lo nombra en las cadenas —con prefijo— y es el id con
+    el que se guarda la ficha: un tier que resuelve a `qwen2.5:7b` a secas emite
+    un candidato que el registry manda al backend cloud, porque el prefijo es
+    justamente lo que decide a quién va. Guardar el id ruteable evita esa clase
+    de bug entera.
+    """
     from src.modules.providers.cliproxy.families import Family, family_from_owned_by
 
     family = family_from_owned_by(owned_by)
     if family is Family.UNKNOWN and hosted == "local":
         family = Family.LOCAL
-    card = ModelCard(id=model, owned_by=owned_by, family=str(family), hosted=hosted)
+    card = ModelCard(id=chain_id or model, owned_by=owned_by, family=str(family), hosted=hosted)
 
     # chat es la puerta: si no responde, el resto de sondas de texto no aplican.
     ok, secs, err = await _timed_ok(backend.chat(_CHAT, model=model, max_tokens=_MAX_TOKENS))
@@ -202,10 +215,13 @@ async def probe_model(
         # modelo no sepa generar, así que en ese caso se conserva la etiqueta
         # previa en vez de marcarlo false y sacar al buen modelo de los tiers.
         prev_image = (previous_card or {}).get("capabilities", {}).get("image")
+        started_image = time.monotonic()
         try:
             r = await backend.image("un cuadrado rojo simple", model=model)
             card.capabilities["image"] = bool(r.images)
-            if not r.images:
+            if r.images:
+                card.image_latency_s = round(time.monotonic() - started_image, 2)
+            else:
                 card.errors["image"] = "respondió sin imagen"
         except BackendCapabilityError:
             card.capabilities["image"] = False
@@ -251,8 +267,9 @@ async def probe_all(
             if not full_id or full_id in seen:
                 continue
             seen.add(full_id)
-            # el id que el backend entiende no lleva el prefijo `ollama/`
-            bare = full_id.split("/", 1)[1] if full_id.startswith("ollama/") else full_id
+            # El backend entiende el id SIN su prefijo; las cadenas lo nombran
+            # CON él. Se prueba con el primero y se guarda con el segundo.
+            bare = full_id.split("/", 1)[1] if _has_backend_prefix(full_id) else full_id
             cards.append(
                 await probe_model(
                     backend,
@@ -260,14 +277,27 @@ async def probe_all(
                     owned_by=entry.get("owned_by", ""),
                     hosted=hosted,
                     include_expensive=include_expensive,
-                    previous_card=previous.get(bare) or previous.get(full_id),
+                    previous_card=previous.get(full_id) or previous.get(bare),
+                    chain_id=full_id,
                 )
             )
     return cards
 
 
+def _has_backend_prefix(model_id: str) -> bool:
+    """Si el id lleva prefijo de backend (`ollama/`, `geminiweb/`).
+
+    Se listan explícitamente y no se asume "cualquier cosa con barra": un id de
+    proveedor puede traer barra por otra razón (`lucho/gemini-2.5-flash` usa el
+    prefijo como proyecto, no como backend), y recortarlo ahí rompería el id.
+    """
+    from src.modules.backends.registry import GEMINI_WEB_PREFIX, LOCAL_PREFIX
+
+    return model_id.startswith((LOCAL_PREFIX, GEMINI_WEB_PREFIX))
+
+
 def _backends_of(registry: BackendRegistry) -> list[Backend]:
-    """Los backends configurados, cloud y (si hay) local."""
+    """Los backends configurados: cloud, y los opcionales que estén activos."""
     backends: list[Backend] = []
     cloud = registry.resolve("_")
     if cloud:
@@ -276,6 +306,10 @@ def _backends_of(registry: BackendRegistry) -> list[Backend]:
         local = registry.resolve("ollama/_")
         if local:
             backends.append(local.backend)
+    if registry.gemini_web_available:
+        web = registry.resolve("geminiweb/_")
+        if web:
+            backends.append(web.backend)
     return backends
 
 
@@ -299,10 +333,21 @@ def carry_forward(
     if not unprobed:
         return
     for card in cards:
-        prev = (previous.get(card.id) or {}).get("capabilities") or {}
+        anterior = previous.get(card.id) or {}
+        prev = anterior.get("capabilities") or {}
         for cap in unprobed:
             if cap in prev:
                 card.capabilities[cap] = prev[cap]
+        # La LATENCIA también se hereda, no sólo el sí/no.
+        #
+        # Sin esto el barrido programado —que corre sin `--images` cada 6 h para
+        # no gastar cuota— borraba `image_latency_s` y dejaba a `fast` sin con
+        # qué ordenar la ruta de imagen: todos los modelos empataban en el
+        # default de "sin medir" y el tier degradaba a un orden arbitrario.
+        # Pasó de verdad: un barrido caro midió las latencias y el barato las
+        # borró seis horas después.
+        if "image" in unprobed and card.image_latency_s is None:
+            card.image_latency_s = anterior.get("image_latency_s")
 
 
 def detect_drift(live_ids: set[str], mapped_ids: set[str]) -> dict[str, list[str]]:
