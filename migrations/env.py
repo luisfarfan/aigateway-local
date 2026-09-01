@@ -18,7 +18,14 @@ from sqlmodel import SQLModel
 
 # Import all SQLModel table models so Alembic can detect them for autogenerate.
 # Add new models here when created.
+#
+# Faltaba observability y por eso una baseline autogenerada salió SIN
+# `llm_requests` ni `llm_attempts` — es decir, sin las tablas que sostienen toda
+# la contabilidad de costos. Un módulo que no se importe acá es invisible para
+# autogenerate, y el hueco no se nota hasta que un despliegue nuevo arranca sin
+# esas tablas.
 import src.modules.jobs.models  # noqa: F401
+import src.modules.observability.models  # noqa: F401
 
 from src.core.config import get_settings
 

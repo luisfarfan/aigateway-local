@@ -150,6 +150,35 @@ make up
 make db-upgrade
 ```
 
+Hay dos revisiones:
+
+| Revisión | Qué hace |
+|---|---|
+| `7b8bb7dc02fa` | **Baseline** — crea las 7 tablas desde los modelos. Una base nueva queda lista con esto. |
+| `29d01702ba9c` | **Reparación** — renombra `artifacts.extra_metadata` y `worker_runtimes.runtime_metadata` a `extra_data`. |
+
+La segunda existe porque el esquema se creó durante meses con `create_all` y los
+campos se renombraron en los modelos sin migración. El desajuste **no era
+cosmético**: el INSERT de un artefacto fallaba con `UndefinedColumnError`, así
+que el plano de jobs no podía guardar **ningún** artefacto — el job corría,
+llamaba al proveedor, subía el archivo a MinIO, y reventaba al registrar la fila.
+
+Es **condicional**: renombra sólo si la columna vieja existe y la nueva no. Tiene
+que ser un no-op en dos casos que conviven — bases nuevas que ya nacen
+correctas, y bases viejas ya reparadas a mano. Un `alter_column` incondicional
+dejaría `upgrade head` roto justo donde no debía hacer nada.
+
+**Si tu base ya existía y estaba correcta**, márcala sin re-ejecutar nada:
+
+```bash
+.venv/bin/python -m alembic stamp head
+```
+
+> **`create_all` sigue corriendo al arrancar la API** (`lifespan.py`), pensado
+> para desarrollo. Con migraciones ya en el repo, esa doble vía puede crear
+> tablas que Alembic no conoce y esconder la deriva. En producción conviene
+> `alembic upgrade head` y nada más.
+
 ### 5. Start the API and worker
 
 ```bash
