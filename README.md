@@ -1,8 +1,24 @@
-# aigateway-local
+# 🛰️ aigateway-local
+
+![python](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)
+![fastapi](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![postgres](https://img.shields.io/badge/Postgres-Alembic-4169E1?logo=postgresql&logoColor=white)
+![redis](https://img.shields.io/badge/Redis-ARQ-DC382D?logo=redis&logoColor=white)
+![tests](https://img.shields.io/badge/tests-301%20passing-success)
+![openai-compatible](https://img.shields.io/badge/API-OpenAI--compatible-412991?logo=openai&logoColor=white)
 
 A self-hosted multimodal AI gateway — runs on your Ubuntu machine and accepts inference requests from any HTTP client (MacBook, another server, etc.).
 
 Think of it as a self-hosted OpenRouter: a unified API for LLMs, TTS, STT, image and video generation using locally installed models, with job queuing, real-time progress via SSE, and artifact storage.
+
+| | |
+|---|---|
+| ⚡ **Dos planos** | `/v1/*` OpenAI-compatible para lo que se espera; `/api/v1/jobs` para lotes y archivos |
+| 🔀 **Cadenas con fallback** | se agota una cuota y responde el siguiente; nunca en silencio |
+| 🎚️ **Routing por intención** | `fast`, `cheap`, `smart` — política sobre el mapa de capacidades, no una lista |
+| 💸 **Costo por proyecto** | quién gastó, cuánto, y si se pagó de verdad o fue suscripción |
+| 🖼️ **Imagen y edición** | generar desde texto, o recontextualizar una foto de producto |
+| 🩺 **Se vigila solo** | circuit breaker, watchdog, prober de capacidades y aviso cuando algo necesita una mano |
 
 ---
 
@@ -622,25 +638,25 @@ de esta máquina.
 
 ### Índice
 
-- [Arranque](#arranque)
-- [Los dos planos](#los-dos-planos)
-- [Plano síncrono `/v1/*`](#plano-síncrono-v1)
+- ▶️ [Arranque](#arranque)
+- 🔀 [Los dos planos](#los-dos-planos)
+- ⚡ [Plano síncrono `/v1/*`](#plano-síncrono-v1)
   - [Autenticación](#autenticación) · [Chat](#chat) · [Búsqueda web](#búsqueda-web)
   - [Visión](#visión) · [Salida estructurada](#salida-estructurada) · [Imágenes](#imágenes)
   - [Streaming](#streaming) · [Function calling](#function-calling)
   - [Embeddings](#embeddings) · [Modelos locales](#modelos-locales)
   - [Errores](#errores-y-reintentos)
-- [Plano de jobs `/api/v1/jobs`](#plano-de-jobs-apiv1jobs)
-- [Configuración](#configuración)
+- 📦 [Plano de jobs `/api/v1/jobs`](#plano-de-jobs-apiv1jobs)
+- ⚙️ [Configuración](#configuración)
   - [Cadenas y fallback](#cadenas-de-modelos-y-fallback) · [Circuit breaker](#circuit-breaker)
   - [Watchdog](#watchdog) · [Precios](#precios) · [Variables](#variables-de-entorno)
-- [SDK de Python](#sdk-de-python)
-- [Observabilidad](#observabilidad)
-- [Routing por intención (tiers)](#routing-por-intención-tiers) · [Descubrir el gateway](#descubrir-qué-ofrece-el-gateway-sin-leer-esto) · [Mapa de capacidades (prober)](#mapa-de-capacidades-prober)
-- [Comparar modelos](#comparar-modelos-evals)
-- [Clientes agénticos](#clientes-agénticos) · [Servicio nativo](#servicio-nativo-que-funcione-siempre)
-- [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
-- [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
+- 🐍 [SDK de Python](#sdk-de-python)
+- 📈 [Observabilidad](#observabilidad)
+- 🎚️ [Routing por intención (tiers)](#routing-por-intención-tiers) · [Descubrir el gateway](#descubrir-qué-ofrece-el-gateway-sin-leer-esto) · [Mapa de capacidades (prober)](#mapa-de-capacidades-prober)
+- ⚖️ [Comparar modelos](#comparar-modelos-evals)
+- 🤖 [Clientes agénticos](#clientes-agénticos) · [Servicio nativo](#servicio-nativo-que-funcione-siempre)
+- 🧩 [Extender](#extender) · [Resolución de problemas](#resolución-de-problemas) · [Desarrollo](#desarrollo)
+- ✅ [Qué está verificado y qué no](#qué-está-verificado-y-qué-no)
 
 ---
 
