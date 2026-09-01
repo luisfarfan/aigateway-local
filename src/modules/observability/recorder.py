@@ -27,7 +27,12 @@ from src.core.config import get_settings
 from src.core.database import AsyncSessionLocal
 from src.modules.observability import tracing
 from src.modules.observability.models import LLMAttempt, LLMRequest
-from src.modules.observability.pricing import Cost, cost_of_images, cost_of_tokens
+from src.modules.observability.pricing import (
+    Cost,
+    cost_of_images,
+    cost_of_tokens,
+    load_pricing,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -59,7 +64,12 @@ class Observation:
     route: str
     requested_model: str
     family: str = "unknown"
-    auth_mode: str = "oauth"
+    # Cómo se paga esta llamada. `None` = se deduce del modelo que respondió, que
+    # es lo correcto casi siempre. Estaba fijo en `"oauth"` y nadie lo cambiaba
+    # nunca, así que `cost_usd` salía 0.00 SIEMPRE — incluso para una credencial
+    # de pago. El día que se cargue una, el gasto real habría desaparecido del
+    # reporte sin que nada lo señalara.
+    auth_mode: str | None = None
 
     response_model: str | None = None
     prompt_tokens: int = 0
@@ -90,19 +100,28 @@ class Observation:
         self.retryable = retryable
 
     def cost(self) -> Cost:
-        """Imagen se cobra por unidad —generada o editada—; el resto por token."""
+        """Imagen se cobra por unidad —generada o editada—; el resto por token.
+
+        El modo de cobro se deduce del modelo que REALMENTE respondió, no del que
+        se pidió: una cadena puede empezar en una credencial de pago y terminar
+        sirviendo por suscripción, y cobrar por el primero sería inventar un
+        gasto que no ocurrió.
+        """
+        model = self.response_model or self.requested_model
+        auth_mode = self.auth_mode or load_pricing().auth_mode_for(model)
+
         if self.route in ("image", "image_edit") and self.image_count:
             return cost_of_images(
-                model=self.response_model or self.requested_model,
+                model=model,
                 image_count=self.image_count,
-                auth_mode=self.auth_mode,
+                auth_mode=auth_mode,
             )
         return cost_of_tokens(
-            model=self.response_model or self.requested_model,
+            model=model,
             family=self.family,
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
-            auth_mode=self.auth_mode,
+            auth_mode=auth_mode,
         )
 
 

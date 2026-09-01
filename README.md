@@ -1576,6 +1576,38 @@ costo cero**: un panel que suma ceros por modelos sin tarifa muestra un gasto qu
 nadie paga y esconde la parte que sí. Por eso los modelos locales se listan con cero
 explícito en vez de omitirse.
 
+#### Cómo se sabe si una llamada se paga de verdad
+
+**El upstream no lo dice.** CLIProxyAPI devuelve un `X-Cpa-Trace-Id` y nada sobre
+qué credencial sirvió. La única señal disponible es el **id del modelo**: una
+credencial de pago se declara allá con `prefix:`, así que se pide como
+`paid/gemini-3.1-flash-image`.
+
+```yaml
+billing:
+  api_key_prefixes:
+    - "paid/"
+```
+
+Todo lo que empiece con uno de esos prefijos se contabiliza como pagado de
+verdad (`cost_usd`); el resto va contra una suscripción y sólo deja
+`cost_usd_equivalent`. **Si cargas una key de pago con otro prefijo, añádelo ahí
+o su gasto se registrará como cero.**
+
+Decide el modelo que **realmente respondió**, no el que se pidió: una cadena
+puede empezar en una credencial de pago y terminar sirviendo por suscripción, y
+cobrar por el primero inventaría un gasto que no ocurrió.
+
+El precio se busca con el id completo y, si no está, sin su prefijo —
+`paid/gpt-image-2` cuesta lo mismo que `gpt-image-2`, porque el prefijo dice por
+dónde entra la llamada, no qué modelo es.
+
+> Esto estuvo roto hasta el 2026-09-01: `auth_mode` estaba fijo en `"oauth"` y
+> nadie lo cambiaba nunca, así que **`cost_usd` salía `0.00` en todas las
+> llamadas**. Mientras todo va por suscripción es correcto por accidente; el día
+> que se cargue una credencial de pago, el gasto real habría desaparecido del
+> reporte sin que nada lo señalara.
+
 > Los precios del repo son **estimados, sin verificar contra las tarifas oficiales**.
 > Sirven para que el mecanismo funcione; revísalos antes de tomar decisiones con esas
 > cifras.

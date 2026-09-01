@@ -56,6 +56,22 @@ class Cost:
         return self.equivalent_usd
 
 
+def _lookup_keys(model: str) -> tuple[str, ...]:
+    """El id tal cual, y sin su prefijo de backend o credencial.
+
+    `paid/gpt-image-2` cuesta lo mismo que `gpt-image-2`: el prefijo dice POR
+    DÓNDE entra la llamada, no qué modelo es. Sin esto, cargar una credencial de
+    pago dejaba al modelo sin precio —`priced: False`— y su gasto desaparecía
+    del reporte por la puerta de al lado justo cuando empezaba a ser real.
+
+    Se busca primero el id completo por si alguien quiere fijarle un precio
+    distinto a una vía concreta; el recorte es el respaldo.
+    """
+    if "/" in model:
+        return (model, model.split("/", 1)[1])
+    return (model,)
+
+
 @dataclass(frozen=True)
 class PricingTable:
     version: int
@@ -63,14 +79,42 @@ class PricingTable:
     families: dict[str, dict[str, float]]
     images: dict[str, dict[str, float]]
     billing: dict[str, dict[str, bool]]
+    api_key_prefixes: tuple[str, ...] = ()
 
     def rate_for(self, model: str, family: str) -> tuple[dict[str, float] | None, str]:
         """Tarifa por token del modelo. Exacto primero, familia después."""
-        if model in self.models:
-            return self.models[model], "model"
+        for candidate in _lookup_keys(model):
+            if candidate in self.models:
+                return self.models[candidate], "model"
         if family in self.families:
             return self.families[family], "family"
         return None, "unknown"
+
+    def image_rate_for(self, model: str) -> dict[str, float] | None:
+        """Precio por imagen. Mismo criterio de búsqueda que `rate_for`."""
+        for candidate in _lookup_keys(model):
+            if candidate in self.images:
+                return self.images[candidate]
+        return None
+
+    def auth_mode_for(self, model: str) -> str:
+        """`api_key` si el modelo va por una credencial de pago, si no `oauth`.
+
+        Se decide por el prefijo del id porque es lo único que lo distingue: el
+        upstream no informa qué credencial sirvió la llamada, y CLIProxyAPI
+        expone las credenciales de pago con `prefix:` — así que `paid/gemini-…`
+        es, literalmente, la señal.
+
+        El sesgo va hacia `oauth` (no cobrado) a propósito, al revés que en
+        `is_charged`: acá un falso positivo inventaría un gasto que no existe, y
+        un reporte que exagera se descubre tarde y mal. Un modelo de pago sin su
+        prefijo declarado aparece como equivalente, que es visible, en vez de
+        como un cargo fantasma.
+        """
+        candidate = model.strip().lower()
+        if any(candidate.startswith(p) for p in self.api_key_prefixes):
+            return "api_key"
+        return "oauth"
 
     def is_charged(self, auth_mode: str) -> bool:
         """`api_key` se paga; `oauth` va contra suscripción.
@@ -105,6 +149,10 @@ def load_pricing(path: str | None = None) -> PricingTable:
         families=raw.get("families") or {},
         images=raw.get("images") or {},
         billing=raw.get("billing") or {},
+        api_key_prefixes=tuple(
+            str(p).strip().lower()
+            for p in ((raw.get("billing") or {}).get("api_key_prefixes") or ())
+        ),
     )
 
 
@@ -148,7 +196,7 @@ def cost_of_images(
 ) -> Cost:
     """La imagen se cobra por unidad, no por token."""
     pricing = table or load_pricing()
-    entry = pricing.images.get(model)
+    entry = pricing.image_rate_for(model)
     if entry is None:
         return Cost(None, None, priced=False, charged=False, source="unknown")
 

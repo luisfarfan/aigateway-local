@@ -25,6 +25,23 @@ billing:
   oauth: {charged: false}    # suscripción (Gemini, Codex, Claude vía CLI)
   api_key: {charged: true}   # se paga por token
 
+  # Cómo se sabe cuál de los dos fue.
+  #
+  # El upstream NO lo dice: CLIProxyAPI devuelve un `X-Cpa-Trace-Id` y nada sobre
+  # qué credencial sirvió. La única señal disponible es el id del modelo, porque
+  # una credencial de pago se declara en CLIProxyAPI con `prefix:` y entonces se
+  # pide como `paid/gemini-3.1-flash-image`.
+  #
+  # Todo lo que empiece con uno de estos prefijos se contabiliza como pagado de
+  # verdad (`cost_usd`); el resto va contra una suscripción y sólo deja
+  # `cost_usd_equivalent`.
+  #
+  # Si algún día se carga una key de pago con OTRO prefijo, hay que añadirlo acá
+  # o su gasto se registrará como cero. Es el precio de que el upstream no lo
+  # diga: la lista es la única fuente de verdad, y por eso vive versionada.
+  api_key_prefixes:
+    - "paid/"
+
 # Precio exacto por id de modelo. Gana sobre todo lo demás.
 models:
   gpt-5.4-mini: {input: 0.25, output: 2.00}
