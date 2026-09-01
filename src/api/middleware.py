@@ -4,6 +4,7 @@ Global middleware and exception handlers.
 Registered on the FastAPI app in app.py.
 Handles: CORS, structured error responses, exception → HTTP mapping.
 """
+
 import time
 
 import structlog
@@ -20,6 +21,7 @@ from src.core.exceptions import (
     ProviderNotSupportedError,
     RateLimitError,
 )
+from src.modules.observability.project import InvalidProject
 
 log = structlog.get_logger(__name__)
 
@@ -30,7 +32,7 @@ def register_middleware(app: FastAPI) -> None:
     # CORS — allow all origins in dev; restrict in production via env
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],        # tighten in production
+        allow_origins=["*"],  # tighten in production
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -86,6 +88,26 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RateLimitError)
     async def rate_limit(request: Request, exc: RateLimitError):
         return _error(status.HTTP_429_TOO_MANY_REQUESTS, exc.message)
+
+    @app.exception_handler(InvalidProject)
+    async def invalid_project(request: Request, exc: InvalidProject):
+        """400 con la forma del plano `/v1/*`, no la de jobs.
+
+        Ese plano es OpenAI-compatible y sus consumidores leen `error.message`;
+        devolverles un `{"detail": ...}` los obligaría a parsear dos formas según
+        qué salió mal. `retryable: false` es el dato que importa: reintentar no
+        arregla una cabecera que falta — hay que cambiar al cliente.
+        """
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": {
+                    "message": str(exc),
+                    "type": "invalid_project",
+                    "retryable": False,
+                }
+            },
+        )
 
     @app.exception_handler(GatewayError)
     async def gateway_error(request: Request, exc: GatewayError):

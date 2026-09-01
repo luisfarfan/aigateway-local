@@ -25,10 +25,12 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from src.core import metrics
 from src.modules.auth.middleware import get_current_client_id
 from src.modules.backends.base import BackendCapabilityError
 from src.modules.backends.registry import BackendRegistry
 from src.modules.cache import llm_cache
+from src.modules.observability import project as project_header
 from src.modules.observability.recorder import AttemptRecord, Observation, observe
 from src.modules.providers.cliproxy.errors import (
     CliproxyError,
@@ -379,9 +381,39 @@ def _client_id_of(request: Request) -> str | None:
 
 
 def _project_of(request: Request) -> str:
-    return (
-        request.headers.get("X-Proxima-Project") or request.app.state.settings.llm_default_project
-    )
+    """Qué sistema llama. OBLIGATORIO, y por eso levanta en vez de inventar.
+
+    Antes caía a un `default` cuando faltaba, y ahí murió la contabilidad: el
+    97,8 % de 3.386 peticiones reales terminó en ese balde, así que "quién gastó
+    más" no se podía responder. Un default silencioso es peor que un error —
+    parece que el dato existe.
+
+    `LLM_REQUIRE_PROJECT=false` desactiva la exigencia y vuelve al default, como
+    salida de emergencia si algún consumidor no se puede actualizar a tiempo. Es
+    un env var para que sea una decisión de operación, no un despliegue.
+    """
+    settings = request.app.state.settings
+    raw = request.headers.get(project_header.HEADER)
+
+    if not getattr(settings, "llm_require_project", True):
+        return raw.strip() if raw and raw.strip() else settings.llm_default_project
+
+    try:
+        return project_header.validate(raw)
+    except project_header.InvalidProject as exc:
+        # El client_id se registra porque es lo único que identifica al infractor
+        # cuando justamente falta el proyecto: sin eso, "alguien no manda la
+        # cabecera" no se puede accionar.
+        log.warning(
+            "project.rejected",
+            client_id=getattr(request.state, "client_id", None),
+            path=request.url.path,
+            reason=str(exc)[:200],
+        )
+        metrics.llm_project_rejected_total.labels(
+            client=str(getattr(request.state, "client_id", None) or "desconocido")
+        ).inc()
+        raise
 
 
 async def _structured(

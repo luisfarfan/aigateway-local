@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     llm_cache_enabled: bool = True
     llm_cache_ttl_s: int = 3600
     llm_default_project: str = "default"
+    # `X-Proxima-Project` obligatoria. Sin ella el gasto de todos los sistemas se
+    # mezcla en un solo balde y la contabilidad por servicio no existe — medido:
+    # el 97,8 % del tráfico caía en `default`. Se puede apagar por env var como
+    # salida de emergencia, sin desplegar código.
+    llm_require_project: bool = True
 
     # ─── Observabilidad (F3) ──────────────────────────────────────────────────
     # Langfuse acepta OTLP sobre HTTP con auth Basic. Sin claves, las trazas se

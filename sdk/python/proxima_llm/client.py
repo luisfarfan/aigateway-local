@@ -12,6 +12,7 @@ el transporte.
 from __future__ import annotations
 
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ class _Base:
         self,
         base_url: str,
         *,
-        project: str = "default",
+        project: str,
         api_key: str | None = None,
         client_id: str | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -43,7 +44,14 @@ class _Base:
         self._project = project
         self._timeout = timeout_seconds
         # `X-Proxima-Project` es lo que separa la contabilidad de costos entre
-        # consumidores. Sin él, todo el gasto cae en un mismo balde.
+        # consumidores, y por eso es un argumento OBLIGATORIO — antes tenía
+        # `"default"` de valor por defecto, y ese default silencioso se comió el
+        # 97,8 % del gasto en un balde que no dice nada.
+        #
+        # Se valida acá además de en el gateway para que el error salga al
+        # construir el cliente, en el arranque del servicio, y no en la primera
+        # llamada real —que puede ser en producción y de noche—.
+        _validate_project(project)
         # El `Content-Type` NO se fija acá: httpx ya pone `application/json`
         # cuando se manda `json=`, y fijarlo a nivel de cliente pisaba el
         # `multipart/form-data; boundary=...` de `image_edit()` — el gateway
@@ -391,6 +399,25 @@ class SyncGateway(_Base):
         payload = _json_or_empty(response)
         p.raise_for_error(response.status_code, payload)
         return payload
+
+
+# Misma forma que exige el gateway (`src/modules/observability/project.py`).
+# Duplicarla es deliberado: el SDK no puede importar del servidor, y un cliente
+# que falla en el arranque con el motivo exacto ahorra un viaje de ida y vuelta.
+_PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{2,39}$")
+
+
+def _validate_project(project: str) -> None:
+    if project == "default":
+        raise ValueError(
+            "`project='default'` está reservado: era el balde donde caía todo lo "
+            "no declarado. Usa el nombre real del sistema que llama."
+        )
+    if not _PROJECT_RE.match(project or ""):
+        raise ValueError(
+            f"`project={project!r}` no cumple la forma esperada: kebab-case de 3 a "
+            "40 caracteres, empezando con minúscula (ej. 'tienda-fotos')."
+        )
 
 
 def _as_files(

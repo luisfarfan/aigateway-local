@@ -18,6 +18,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from src.api.middleware import register_exception_handlers
 from src.api.openai_compat.router import router
 from src.modules.backends.registry import BackendRegistry
 from src.modules.providers.cliproxy.errors import (
@@ -113,6 +114,7 @@ class FakeSettings:
     llm_cache_enabled = True
     llm_cache_ttl_s = 3600
     llm_default_project = "tests"
+    llm_require_project = True
 
 
 def build_app(client: FakeCliproxyClient, *, local: object | None = None) -> FastAPI:
@@ -124,15 +126,27 @@ def build_app(client: FakeCliproxyClient, *, local: object | None = None) -> Fas
     """
     app = FastAPI()
     app.include_router(router)
+    # El MISMO registrador que usa producción. Si los tests montaran una app sin
+    # manejadores, un fallo de dominio saldría 500 acá y 400 en el gateway real,
+    # y el contrato quedaría sin probar justo donde importa.
+    register_exception_handlers(app)
     app.state.backends = BackendRegistry(cloud=client, local=local)
     app.state.settings = FakeSettings()
     return app
 
 
 async def call(app: FastAPI, method: str, path: str, **kwargs: Any):
+    """Llama al gateway declarando proyecto, como debe hacerlo un consumidor.
+
+    `X-Proxima-Project` es obligatoria desde que el gasto sin declarar caía todo
+    en un balde `default` inútil. Se manda por defecto acá para que cada test no
+    tenga que repetirla; los que prueban justamente su ausencia la pisan con
+    `headers={}`.
+    """
+    headers = {"X-Proxima-Project": "tests-router", **(kwargs.pop("headers", None) or {})}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
-        return await http.request(method, path, **kwargs)
+        return await http.request(method, path, headers=headers, **kwargs)
 
 
 # ─── Ruteo ────────────────────────────────────────────────────────────────────
@@ -199,6 +213,7 @@ async def test_streaming_devuelve_los_chunks_del_upstream():
             "POST",
             "/v1/chat/completions",
             json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+            headers={"X-Proxima-Project": "tests-router"},
         ) as response,
     ):
         assert response.status_code == 200
@@ -221,6 +236,7 @@ async def test_streaming_dice_quien_lo_sirvio_en_una_cabecera():
             "POST",
             "/v1/chat/completions",
             json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+            headers={"X-Proxima-Project": "tests-router"},
         ) as response,
     ):
         assert response.headers["x-proxima-served-by"]
@@ -548,10 +564,10 @@ async def test_proyectos_distintos_no_comparten_cache(fake_cache):
     }
 
     await call(
-        app, "POST", "/v1/chat/completions", json=payload, headers={"X-Proxima-Project": "a"}
+        app, "POST", "/v1/chat/completions", json=payload, headers={"X-Proxima-Project": "tienda-a"}
     )
     await call(
-        app, "POST", "/v1/chat/completions", json=payload, headers={"X-Proxima-Project": "b"}
+        app, "POST", "/v1/chat/completions", json=payload, headers={"X-Proxima-Project": "tienda-b"}
     )
     assert fake.calls == ["chat", "chat"]
 
@@ -785,6 +801,7 @@ async def test_el_streaming_queda_contabilizado_al_terminar():
                 "POST",
                 "/v1/chat/completions",
                 json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+                headers={"X-Proxima-Project": "tests-router"},
             ) as response,
         ):
             async for _ in response.aiter_bytes():
@@ -865,6 +882,7 @@ async def test_streaming_registra_el_modelo_saltado_por_circuito_abierto(monkeyp
             "POST",
             "/v1/chat/completions",
             json={"messages": [{"role": "user", "content": "x"}], "stream": True},
+            headers={"X-Proxima-Project": "tests-router"},
         ) as response,
     ):
         async for _ in response.aiter_bytes():
@@ -1108,3 +1126,63 @@ async def test_un_backend_opcional_caido_no_vacia_el_inventario():
     response = await call(app, "GET", "/v1/models")
     assert response.status_code == 200
     assert response.json()["data"], "el inventario cloud tiene que sobrevivir"
+
+
+# ─── Proyecto obligatorio ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ruta",
+    ["/v1/chat/completions", "/v1/images/generations", "/v1/embeddings"],
+)
+async def test_sin_proyecto_es_400_en_todas_las_rutas(ruta: str):
+    """La exigencia vive en `_project_of`, que comparten todos los endpoints del
+    plano. Si alguno se saltara la validación, sería la puerta por la que vuelve
+    a colarse el gasto sin atribuir."""
+    cuerpo = {"messages": [{"role": "user", "content": "x"}], "prompt": "x", "input": "x"}
+    response = await call(
+        build_app(FakeCliproxyClient()), "POST", ruta, json=cuerpo, headers={"X-Proxima-Project": ""}
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["type"] == "invalid_project"
+    # Reintentar no arregla una cabecera que falta: hay que cambiar al cliente.
+    assert error["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_el_400_conserva_la_forma_de_error_del_plano_v1():
+    """Este plano es OpenAI-compatible y sus consumidores leen `error.message`.
+    Devolverles un `{"detail": ...}` los obligaría a parsear dos formas según qué
+    salió mal."""
+    response = await call(
+        build_app(FakeCliproxyClient()),
+        "POST",
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "x"}]},
+        headers={"X-Proxima-Project": "default"},
+    )
+    assert response.status_code == 400
+    cuerpo = response.json()
+    assert set(cuerpo) == {"error"}
+    assert "reservado" in cuerpo["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_se_puede_desactivar_la_exigencia_sin_desplegar_codigo():
+    """Salida de emergencia por env var, para el caso de un consumidor que no se
+    puede actualizar a tiempo. Es una decisión de operación, no un despliegue."""
+    app = build_app(FakeCliproxyClient())
+    app.state.settings.llm_require_project = False
+    try:
+        response = await call(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "x"}]},
+            headers={"X-Proxima-Project": ""},
+        )
+        assert response.status_code == 200
+    finally:
+        app.state.settings.llm_require_project = True

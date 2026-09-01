@@ -126,3 +126,14 @@ gemini_web_session_checks_total = Counter(
     "sin que `expired` suba, el problema es la sonda, no la credencial.",
     ["outcome"],
 )
+
+
+
+llm_project_rejected_total = Counter(
+    "gateway_llm_project_rejected_total",
+    "Peticiones rechazadas por no declarar un `X-Proxima-Project` válido, por "
+    "cliente. Si sube tras activar la exigencia, hay un consumidor sin migrar — "
+    "y la etiqueta dice cuál, que es lo único accionable cuando justamente falta "
+    "el proyecto.",
+    ["client"],
+)

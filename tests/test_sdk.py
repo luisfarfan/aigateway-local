@@ -209,7 +209,7 @@ async def test_una_salida_invalida_trae_el_detalle_de_cada_intento():
 @pytest.mark.asyncio
 async def test_el_gateway_caido_se_reporta_como_reintentable():
     """Casi siempre es el gateway reiniciándose o la red."""
-    gw = Gateway("http://127.0.0.1:9", timeout_seconds=2)
+    gw = Gateway("http://127.0.0.1:9", project="tests-sdk", timeout_seconds=2)
     with pytest.raises(ProximaError) as exc:
         await gw.chat("x")
     await gw.aclose()
@@ -327,3 +327,28 @@ async def test_image_edit_sube_la_foto_al_backend(tmp_path: Path):
     assert [img.url for img in completion.images] == ["data:image/png;base64,QUJD"]
     enviadas = backend.bodies[-1]["images"]
     assert [(img.filename, img.content) for img in enviadas] == [("producto.png", b"\x89PNG-falso")]
+
+
+# ─── Proyecto obligatorio ─────────────────────────────────────────────────────
+
+
+def test_construir_el_cliente_sin_proyecto_falla_en_el_arranque():
+    """`project` pasó de tener default `"default"` a ser obligatorio: ese default
+    silencioso se comió el 97,8 % del gasto en un balde que no dice nada.
+
+    Y se valida al CONSTRUIR, no en la primera llamada: así el servicio que lo
+    usa revienta al arrancar, no de noche en producción.
+    """
+    with pytest.raises(TypeError):
+        Gateway("http://gw")  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("malo", ["default", "ab", "Tienda", "tienda fotos", ""])
+def test_un_proyecto_mal_formado_falla_antes_de_salir_a_la_red(malo: str):
+    with pytest.raises(ValueError):
+        Gateway("http://gw", project=malo)
+
+
+def test_los_nombres_validos_construyen_sin_ruido():
+    for bueno in ("rag", "tienda-fotos", "demo-costos"):
+        Gateway("http://gw", project=bueno)

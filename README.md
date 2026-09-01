@@ -631,6 +631,51 @@ GET  /v1/models               inventario (cloud + local + tiers)
 GET  /v1/capabilities         qué sabe hacer cada modelo + a qué resuelve cada tier
 ```
 
+### `X-Proxima-Project` es obligatoria
+
+**Cambio que rompe a los consumidores que no la manden.** Toda petición a `/v1/*`
+tiene que declarar qué sistema la hace:
+
+```bash
+-H "X-Proxima-Project: tienda-fotos"
+```
+
+Sin ella, **400** con `type: invalid_project` y `retryable: false` — reintentar
+no arregla una cabecera que falta.
+
+Por qué se fuerza, con el número que lo motivó: sobre 3.386 peticiones reales el
+**97,8 % cayó en un balde `default`** porque la cabecera era opcional. Con eso,
+"quién gastó más" tenía una sola respuesta y era inútil. Un default silencioso es
+peor que un error: parece que el dato existe.
+
+**Forma:** kebab-case de 3 a 40 caracteres — `^[a-z][a-z0-9-]{2,39}$`. Sale de
+los nombres que ya se usaban (`rag`, `demo-costos`, `desde-github`), así que no
+obliga a renombrar nada. Se rechazan mayúsculas, espacios, acentos y guiones
+bajos: `Tienda`, `tienda ` y `tienda-fotos` serían tres proyectos distintos en el
+reporte, y un typo no puede partir la contabilidad en silencio.
+
+`default` se rechaza explícitamente aunque venga declarado — era el balde de lo
+no atribuido, y aceptarlo dejaría reproducir el mismo agujero con un valor que
+*parece* declarado.
+
+**Salida de emergencia**, si algún consumidor no se puede actualizar a tiempo:
+
+```env
+LLM_REQUIRE_PROJECT=false
+```
+
+Vuelve al comportamiento anterior sin desplegar código. La métrica
+`gateway_llm_project_rejected_total{client}` dice **cuál** cliente está sin
+migrar, que es lo único accionable cuando justamente falta el proyecto.
+
+En el SDK `project` pasó a ser un argumento **obligatorio** y se valida al
+construir el cliente, no en la primera llamada — así el servicio revienta al
+arrancar y no de noche en producción:
+
+```python
+SyncGateway("http://192.168.1.12:8000", api_key=CLAVE, project="tienda-fotos")
+```
+
 ### Autenticación
 
 Todas las rutas exigen `Authorization: Bearer <clave>`, con las claves de `API_KEYS`
