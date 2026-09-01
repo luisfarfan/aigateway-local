@@ -83,6 +83,21 @@ tts = [
     "TTS>=0.22.0",              # Coqui XTTS v2 / Kokoro / Piper via LocalTTSProvider
 ]
 
+# Último recurso de la ruta de imagen: la app web de Gemini por cookie de sesión.
+#
+# OPCIONAL A PROPÓSITO, y no sólo por peso. `gemini_webapi` es **AGPL-3.0**: al
+# ser una dependencia opcional que no se instala por defecto, este repo se
+# distribuye sin ella. Para uso privado en red local no dispara obligaciones;
+# antes de distribuir el gateway o exponerlo a terceros con esto activo, hay que
+# revisar la §13 de la AGPL (el uso en red cuenta como distribución).
+#
+# Además es ingeniería inversa de la app web: sin contrato de API, se rompe
+# cuando Google cambie. Por eso va al fondo de las cadenas y apagado por defecto
+# (`ENABLE_BACKEND_GEMINI_WEB=false`).
+geminiweb = [
+    "gemini_webapi>=2.1.0",     # AGPL-3.0 — ver nota de arriba
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 

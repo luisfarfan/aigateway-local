@@ -53,6 +53,10 @@ class FakeBackend:
         self.bodies.append({"prompt": prompt, **kwargs})
         return await self._answer()
 
+    async def image_edit(self, prompt: str, *, images: Any, **kwargs: Any) -> LLMResult:
+        self.bodies.append({"prompt": prompt, "images": images, **kwargs})
+        return await self._answer()
+
     async def family_of(self, model: str) -> str:
         return "google"
 
@@ -278,3 +282,48 @@ def test_sync_habla_con_el_gateway_de_verdad():
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+# ─── Imagen ───────────────────────────────────────────────────────────────────
+
+
+def test_una_imagen_en_b64_llega_al_llamante():
+    """Regresión: `data[].b64_json` es el DEFAULT del gateway, y el SDK sólo
+    leía `data[].url`. La llamada costaba una imagen, devolvía 200, y
+    `completion.images` venía vacío sin un solo error que lo explicara.
+
+    `Image.url` promete un data URI siempre, así que el base64 pelado se
+    envuelve acá y no en cada consumidor."""
+    completion = protocol.read_images({"model": "gpt-image-2", "data": [{"b64_json": "QUJD"}]})
+    assert [img.url for img in completion.images] == ["data:image/png;base64,QUJD"]
+
+
+def test_url_explicito_se_respeta_tal_cual():
+    """Si el cliente pidió `url`, el gateway ya manda un data URI entero: envolverlo
+    otra vez lo rompería."""
+    completion = protocol.read_images(
+        {"model": "gpt-image-2", "data": [{"url": "data:image/png;base64,QUJD"}]}
+    )
+    assert [img.url for img in completion.images] == ["data:image/png;base64,QUJD"]
+
+
+@pytest.mark.asyncio
+async def test_image_edit_sube_la_foto_al_backend(tmp_path: Path):
+    """La foto tiene que llegar al backend en bytes, no perderse por el camino.
+
+    Se prueba con una ruta porque es la forma que usa un script; `_as_files`
+    acepta además bytes y `(nombre, bytes)`.
+    """
+    backend = FakeBackend(
+        LLMResult(text="", model="gpt-image-2", images=["data:image/png;base64,QUJD"])
+    )
+    foto = tmp_path / "producto.png"
+    foto.write_bytes(b"\x89PNG-falso")
+
+    async with build_gateway(backend) as gw:
+        completion = await gw.image_edit("sobre madera", foto)
+
+    assert completion.model == "gpt-image-2"
+    assert [img.url for img in completion.images] == ["data:image/png;base64,QUJD"]
+    enviadas = backend.bodies[-1]["images"]
+    assert [(img.filename, img.content) for img in enviadas] == [("producto.png", b"\x89PNG-falso")]

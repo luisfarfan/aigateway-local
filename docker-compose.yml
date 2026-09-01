@@ -138,7 +138,11 @@ services:
     container_name: agl_cliproxy
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8417:8317"      # API + panel de gestión
+      # Abierto a la LAN a propósito: otras PCs de la red suben su credencial
+      # por POST /v0/management/auth-files, sin OAuth. Los puertos de callback
+      # de abajo siguen en 127.0.0.1 — ese login necesita túnel SSH igual,
+      # porque el redirect_uri es localhost y lo resuelve el navegador.
+      - "0.0.0.0:8417:8317"        # API + panel de gestión
       - "127.0.0.1:11455:1455"     # callback OAuth  codex
       - "127.0.0.1:18085:8085"     # callback OAuth  gemini
       - "127.0.0.1:51221:51121"    # callback OAuth  antigravity

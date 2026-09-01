@@ -107,7 +107,16 @@ async def run_with_fallback[T](
             if kind != UNSUPPORTED_CAPABILITY:
                 last_substantive = exc
 
-            await breaker.record_failure(model)
+            # Si el upstream dijo cuánto tarda en volver, se le cree y se abre
+            # el circuito por ESE tiempo. El contador de fallos no sirve acá:
+            # está pensado para chat —5 fallos en 60 s— y una ruta de imagen,
+            # que tarda 20-90 s por llamada y se usa de a una, nunca junta cinco
+            # dentro de la ventana. Sin esto, un modelo con la cuota agotada por
+            # dos días se reintenta en cada petición para siempre.
+            if (espera := getattr(exc, "retry_after_s", None)) and espera > 0:
+                await breaker.open(model, int(espera), reason=f"upstream pide esperar {espera}s")
+            else:
+                await breaker.record_failure(model)
 
             if not table.should_fallback(kind):
                 # El siguiente modelo fallaría igual. Se corta acá para no gastar

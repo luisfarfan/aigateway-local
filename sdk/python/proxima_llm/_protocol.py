@@ -68,6 +68,22 @@ def image_body(
     return body
 
 
+def image_edit_form(
+    prompt: str, *, model: str | None, size: str | None, quality: str | None
+) -> dict[str, str]:
+    """Campos de texto del multipart. Las imágenes van aparte, como archivos.
+
+    `size` sólo se manda si quien llama insiste: medido contra `gpt-image-2`,
+    omitirlo hace que la salida herede la proporción de la foto de entrada, que
+    es casi siempre lo que se quiere. Mandarlo la cambia sin cumplir lo pedido.
+    """
+    form: dict[str, str] = {"prompt": prompt}
+    for key, value in (("model", model), ("size", size), ("quality", quality)):
+        if value:
+            form[key] = value
+    return form
+
+
 def raise_for_error(status: int, payload: Any) -> None:
     """Convierte la respuesta de error del gateway en `ProximaError`."""
     if status < 400:
@@ -122,9 +138,28 @@ def read_images(payload: dict[str, Any]) -> Completion:
         model=payload.get("model") or "",
         prompt_tokens=int(usage.get("prompt_tokens") or 0),
         completion_tokens=int(usage.get("completion_tokens") or 0),
-        images=[Image(url=item["url"]) for item in payload.get("data") or [] if item.get("url")],
+        images=_read_image_items(payload.get("data") or []),
         raw=payload,
     )
+
+
+def _read_image_items(items: list[dict[str, Any]]) -> list[Image]:
+    """Las dos formas del contrato OpenAI, normalizadas a data URI.
+
+    `Image.url` promete un data URI siempre, y el gateway responde con el campo
+    que se le haya pedido: `b64_json` por defecto (base64 pelado, sin cabecera),
+    `url` si el cliente lo pidió explícito. Leer sólo `url` —como se hacía—
+    devolvía una lista VACÍA en el caso por defecto: la llamada costaba una
+    imagen, salía 200, y quien llamaba recibía cero sin ningún error que lo
+    explicara.
+    """
+    images: list[Image] = []
+    for item in items:
+        if url := item.get("url"):
+            images.append(Image(url=url))
+        elif b64 := item.get("b64_json"):
+            images.append(Image(url=f"data:image/png;base64,{b64}"))
+    return images
 
 
 def embeddings_body(texts: list[str], *, model: str | None) -> dict[str, Any]:

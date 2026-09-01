@@ -106,10 +106,12 @@ class CliproxyClient:
         self._base_url = normalize_base_url(base_url)
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            # Sólo Authorization. El `Content-Type` NO se fija acá a propósito:
+            # httpx ya pone `application/json` cuando se manda `json=`, y
+            # dejarlo puesto a nivel de cliente pisaba el `multipart/form-data;
+            # boundary=...` de `/v1/images/edits` — el upstream recibía un
+            # cuerpo multipart etiquetado como JSON y lo rechazaba.
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout_seconds,
             transport=transport,
         )
@@ -210,6 +212,34 @@ class CliproxyClient:
         payload = await self._request("POST", request.path, request.body)
         return translate.parse_image(payload, model=model)
 
+    async def image_edit(
+        self,
+        prompt: str,
+        *,
+        images: list[translate.InputImage],
+        model: str,
+        size: str | None = None,
+        quality: str | None = None,
+    ) -> LLMResult:
+        """Edición desde una foto. Dos transportes según la familia del modelo.
+
+        Gemini vuelve por el chat (JSON); OpenAI por `/v1/images/edits`
+        (multipart). `parse_image` ya distingue las dos formas de respuesta, así
+        que la diferencia muere acá y no se propaga.
+        """
+        request = translate.image_edit_request(
+            model=model, prompt=prompt, images=images, size=size, quality=quality
+        )
+        if isinstance(request, translate.MultipartRequest):
+            payload = await self._request_multipart(
+                request.path, data=request.data, files=request.files
+            )
+        else:
+            payload = await self._request(
+                "POST", request.path, request.body, timeout_s=self._image_timeout
+            )
+        return translate.parse_image(payload, model=model)
+
     @asynccontextmanager
     async def stream_chat(
         self,
@@ -266,6 +296,34 @@ class CliproxyClient:
 
     # ── Transporte ────────────────────────────────────────────────────────────
 
+    async def _request_multipart(
+        self,
+        path: str,
+        *,
+        data: dict[str, str],
+        files: list[tuple[str, tuple[str, bytes, str]]],
+    ) -> dict[str, Any]:
+        """POST multipart, para subir imágenes de entrada.
+
+        httpx pone el `Content-Type` con el `boundary` que genera; por eso el
+        cliente no fija ninguno por defecto (ver `__init__`).
+
+        Se reusa el timeout largo de imagen: editar tarda lo mismo que generar.
+        """
+        try:
+            response = await self._client.post(
+                path,
+                data=data,
+                files=files,
+                timeout=self._image_timeout,
+            )
+        except httpx.TimeoutException as exc:
+            raise CliproxyTransportError(f"timeout en {path}") from exc
+        except httpx.HTTPError as exc:
+            raise CliproxyTransportError(f"fallo de transporte en {path}: {exc}") from exc
+
+        return self._payload_or_raise(response, path)
+
     async def _request(
         self,
         method: str,
@@ -285,6 +343,16 @@ class CliproxyClient:
         except httpx.HTTPError as exc:
             raise CliproxyTransportError(f"fallo de transporte en {path}: {exc}") from exc
 
+        return self._payload_or_raise(response, path)
+
+    @staticmethod
+    def _payload_or_raise(response: httpx.Response, path: str) -> dict[str, Any]:
+        """Cuerpo de la respuesta, o la excepción que le corresponde.
+
+        Compartido por el camino JSON y el multipart: los dos tienen que mirar
+        el cuerpo aunque el status sea 200, porque la generación de imagen de
+        Gemini responde 200 con `error.code: 429` adentro.
+        """
         try:
             payload: Any = response.json()
         except ValueError:

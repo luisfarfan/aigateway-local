@@ -158,6 +158,29 @@ class Settings(BaseSettings):
     watchdog_enabled: bool = True
     watchdog_interval_s: int = 900
 
+    # Último recurso de la ruta de imagen: la app web de Gemini por cookie de
+    # sesión. Apagado por defecto — depende de una dependencia AGPL opcional y
+    # de una credencial que es la sesión entera de una cuenta de Google, así que
+    # se enciende a propósito, nunca por omisión.
+    enable_backend_gemini_web: bool = False
+    gemini_web_secure_1psid: str = ""
+    gemini_web_secure_1psidts: str = ""
+    gemini_web_timeout_s: float = 300.0
+    # Dónde guarda la librería las cookies ya rotadas. Su default es /tmp, que
+    # systemd vacía al arrancar: con eso, cada reinicio vuelve a la semilla del
+    # `.env` —vieja— y la sesión se muere sola. Persistirlo rompe ese ciclo.
+    gemini_web_cookie_cache_dir: str = "~/.proxima-gateway/gemini-web-cache"
+    # Cada cuánto se comprueba que la cookie siga viva. 30 min es holgado a
+    # propósito: la sonda habla con Google, y una sesión que expiró va a seguir
+    # expirada — no hay nada que ganar preguntando cada minuto.
+    gemini_web_session_check_interval_s: int = 1800
+
+    # Aviso al operador cuando algo necesita una mano humana (hoy: la sesión de
+    # la app web de Gemini). Sin token configurado no se manda nada y se
+    # registra en el log; el gateway funciona igual.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     # --- Local Engine Settings ---
     ollama_base_url: str = "http://localhost:11434"
     local_llm_backend: str = "ollama"

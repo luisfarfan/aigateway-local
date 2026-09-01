@@ -58,6 +58,10 @@ class FakeCliproxyClient:
     async def image(self, prompt: str, **_: Any) -> LLMResult:
         return await self._answer("image")
 
+    async def image_edit(self, prompt: str, *, images: list[Any], **_: Any) -> LLMResult:
+        self.input_images = images
+        return await self._answer("image_edit")
+
     async def models(self, **_: Any) -> list[dict[str, Any]]:
         self.calls.append("models")
         if self._raises:
@@ -329,6 +333,67 @@ async def test_imagen_default_es_b64_json():
         build_app(fake), "POST", "/v1/images/generations", json={"prompt": "un cubo"}
     )
     assert response.json()["data"][0] == {"b64_json": "AAA"}
+
+
+@pytest.mark.asyncio
+async def test_edicion_recibe_la_foto_y_no_va_a_generacion():
+    """La foto de entrada tiene que LLEGAR al backend.
+
+    Es la regresión que importa: antes de cablear esto, la ruta de imagen tiraba
+    en silencio cualquier imagen de entrada y devolvía una generada desde cero.
+    Se veía como un éxito y no lo era — para un catálogo de ecommerce, una foto
+    que no es la del producto es exactamente el fallo que no se puede tener.
+    """
+    fake = FakeCliproxyClient(
+        LLMResult(text="", model="gpt-image-2", images=["data:image/png;base64,BBB"])
+    )
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/edits",
+        data={"prompt": "ponlo sobre madera"},
+        files={"image": ("mug.png", b"\x89PNG-falso", "image/png")},
+    )
+    assert response.status_code == 200
+    assert fake.calls == ["image_edit"]
+    assert [img.content for img in fake.input_images] == [b"\x89PNG-falso"]
+    assert response.json()["data"][0] == {"b64_json": "BBB"}
+
+
+@pytest.mark.asyncio
+async def test_edicion_acepta_varias_referencias():
+    """`image[]` repetido: producto y fondo de marca en la misma petición."""
+    fake = FakeCliproxyClient(
+        LLMResult(text="", model="gpt-image-2", images=["data:image/png;base64,CCC"])
+    )
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/edits",
+        data={"prompt": "combínalas"},
+        files=[
+            ("image", ("a.png", b"AAA", "image/png")),
+            ("image", ("b.png", b"BBB", "image/png")),
+        ],
+    )
+    assert response.status_code == 200
+    assert [img.filename for img in fake.input_images] == ["a.png", "b.png"]
+
+
+@pytest.mark.asyncio
+async def test_edicion_se_tarifa_por_imagen_no_por_token():
+    """`image_edit` es una ruta nueva, y `Observation.cost()` decide la tarifa
+    por el nombre de la ruta. Si no se la nombra, una edición se cobraría con la
+    tabla de tokens —que para un modelo de imagen no tiene precio— y el gasto
+    quedaría en `None` sin que nadie se entere."""
+    from src.modules.observability.recorder import Observation
+
+    obs = Observation(project="p", route="image_edit", requested_model="gpt-image-2")
+    obs.image_count = 1
+    obs.auth_mode = "api_key"
+    cost = obs.cost()
+    assert cost.priced and cost.source == "image"
+    assert cost.amount_usd == pytest.approx(0.04)
 
 
 # ─── Errores ──────────────────────────────────────────────────────────────────
@@ -967,3 +1032,79 @@ async def test_imagen_respeta_response_format_b64_json():
         json={"prompt": "x", "response_format": "url"},
     )
     assert url.json()["data"][0] == {"url": "data:image/png;base64,QUJD"}
+
+
+# ─── Descubrimiento ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_capabilities_anuncia_TODAS_las_rutas_no_solo_chat():
+    """Regresión de un hueco que hacía invisible medio gateway.
+
+    Estaba cableado a `route="chat"`, así que un sistema que preguntaba "¿qué me
+    das para imagen?" no veía nada: `fast` y `cheap` ya resolvían cadenas de
+    imagen, pero sólo se enteraba quien leyera el README. Y el propio README dice
+    que un sistema que consume no lo lee — pregunta.
+    """
+    response = await call(build_app(FakeCliproxyClient()), "GET", "/v1/capabilities")
+    assert response.status_code == 200
+    body = response.json()
+
+    for tier in body["tiers"].values():
+        for ruta in ("chat", "image", "image_edit", "websearch", "embeddings"):
+            assert ruta in tier, f"falta la ruta {ruta} en el anuncio de tiers"
+
+
+@pytest.mark.asyncio
+async def test_capabilities_dice_a_que_endpoint_va_cada_ruta():
+    """`image_edit` es un nombre interno del routing. Sin este mapa, un
+    consumidor tiene que adivinar que se usa con `POST /v1/images/edits`."""
+    body = (await call(build_app(FakeCliproxyClient()), "GET", "/v1/capabilities")).json()
+
+    rutas = body["routes"]
+    assert rutas["image_edit"]["endpoint"] == "POST /v1/images/edits"
+    assert rutas["image_edit"]["requires"] == "image"
+    assert rutas["image"]["endpoint"] == "POST /v1/images/generations"
+
+
+@pytest.mark.asyncio
+async def test_models_anuncia_el_backend_de_ultimo_recurso():
+    """Si no aparece en el inventario, un sistema no puede descubrir que existe
+    —ni pedirlo por nombre— aunque esté en las cadenas de routing.yaml."""
+    from src.modules.backends.registry import BackendRegistry
+
+    class FakeWeb:
+        name = "gemini_web"
+
+        async def models(self, **_: Any) -> list[dict[str, Any]]:
+            return [{"id": "geminiweb/nano-banana-web", "owned_by": "gemini_web"}]
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.backends = BackendRegistry(cloud=FakeCliproxyClient(), gemini_web=FakeWeb())
+    app.state.settings = FakeSettings()
+
+    body = (await call(app, "GET", "/v1/models")).json()
+    assert "geminiweb/nano-banana-web" in [m["id"] for m in body["data"]]
+
+
+@pytest.mark.asyncio
+async def test_un_backend_opcional_caido_no_vacia_el_inventario():
+    """Mismo criterio que con Ollama: el inventario del resto tiene que salir
+    igual, con el hueco registrado en el log."""
+    from src.modules.backends.registry import BackendRegistry
+
+    class WebRoto:
+        name = "gemini_web"
+
+        async def models(self, **_: Any):
+            raise RuntimeError("sesión caída")
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.backends = BackendRegistry(cloud=FakeCliproxyClient(), gemini_web=WebRoto())
+    app.state.settings = FakeSettings()
+
+    response = await call(app, "GET", "/v1/models")
+    assert response.status_code == 200
+    assert response.json()["data"], "el inventario cloud tiene que sobrevivir"

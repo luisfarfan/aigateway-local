@@ -51,6 +51,10 @@ class FakeClient:
     async def image(self, prompt: str, **_: Any) -> LLMResult:
         return await self._answer("image")
 
+    async def image_edit(self, prompt: str, *, images: Any, **_: Any) -> LLMResult:
+        self.input_images = images
+        return await self._answer("image_edit")
+
     async def models(self, **_: Any) -> list[dict[str, Any]]:
         return [{"id": "gemini-3-flash", "owned_by": "antigravity"}]
 
@@ -107,6 +111,9 @@ def no_storage(monkeypatch):
         async def upload(self, key: str, data: bytes, content_type: str) -> None:
             uploaded.append((key, data, content_type))
 
+        async def download(self, key: str) -> bytes:
+            return f"bytes-de-{key}".encode()
+
     monkeypatch.setattr(provider_module, "storage", FakeStorage())
     return uploaded
 
@@ -118,6 +125,10 @@ def test_solo_declara_lo_que_puede_hacer():
     p = CliproxyProvider(client=FakeClient())
     assert p.supports(JobType.TEXT_GENERATION)
     assert p.supports(JobType.IMAGE_GENERATION)
+    # Editar desde una foto sale por acá además de por diffusers: el local
+    # necesita VRAM que esta máquina no tiene, y los lotes de catálogo van por
+    # el plano de jobs.
+    assert p.supports(JobType.IMAGE_EDIT)
     assert not p.supports(JobType.TEXT_TO_SPEECH)
     assert not p.supports(JobType.VIDEO_ASSEMBLY)
 
@@ -292,4 +303,52 @@ async def test_cancelar_antes_de_empezar_no_gasta_cuota():
     result = await p.execute(make_context(Recorder(), job_id=job_id))
 
     assert result.success is False
+    assert fake.calls == []
+
+
+# ─── Edición de imagen ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_image_edit_baja_las_fotos_de_minio(no_storage):
+    """La foto de entrada vive en MinIO, no en el payload: el job la referencia
+    por clave, igual que el provider local de img2img. Se acepta `image_key` y
+    `image_keys` para poder dar varias referencias en una sola petición."""
+    fake = FakeClient(LLMResult(text="", model="gpt-image-2", images=[PNG_DATA_URI]))
+
+    await CliproxyProvider(client=fake).execute(
+        make_context(
+            Recorder(),
+            job_type=JobType.IMAGE_EDIT,
+            payload={
+                "prompt": "sobre madera",
+                "image_key": "uploads/producto.png",
+                "image_keys": ["uploads/fondo.jpg"],
+            },
+        )
+    )
+
+    assert fake.calls == ["image_edit"]
+    assert [(i.filename, i.content_type) for i in fake.input_images] == [
+        ("producto.png", "image/png"),
+        ("fondo.jpg", "image/jpeg"),
+    ]
+    assert [i.content for i in fake.input_images] == [
+        b"bytes-de-uploads/producto.png",
+        b"bytes-de-uploads/fondo.jpg",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_image_edit_sin_foto_falla_con_un_mensaje_util(no_storage):
+    """Sin imagen de entrada no es una edición. Falla explícito en vez de
+    mandar una petición vacía al upstream y gastar cuota para nada."""
+    fake = FakeClient()
+
+    result = await CliproxyProvider(client=fake).execute(
+        make_context(Recorder(), job_type=JobType.IMAGE_EDIT, payload={"prompt": "x"})
+    )
+
+    assert result.success is False
+    assert "image_key" in (result.error_message or "")
     assert fake.calls == []

@@ -6,9 +6,12 @@
 # barato, entra solo en el próximo barrido del prober. La política no envejece;
 # una lista sí.
 #
-# `require`  → capacidades que el modelo debe tener (medidas por el prober).
-#              La ruta añade la suya: `cheap` en websearch = barato Y con
-#              websearch.
+# `require`  → capacidades EXTRA que el modelo debe tener, más allá de la que la
+#              ruta ya exige por sí sola. Normalmente vacío: la ruta aporta la
+#              suya (`image` exige `image`, `websearch` exige `websearch`), así
+#              que repetir `chat` acá sólo servía para que los tiers no
+#              funcionaran fuera de las rutas de texto — un modelo de imagen
+#              tiene `chat: False` y quedaba filtrado de `fast` y `cheap`.
 # `rank_by`  → cómo se ordena la cadena:
 #                cost_asc     más barato primero  (usa pricing.yaml)
 #                latency_asc  más rápido primero  (medido por el prober)
@@ -22,21 +25,29 @@ version: 1
 
 tiers:
   # Medibles: se derivan solos del mapa. No envejecen.
+  # En rutas de imagen ordena por el precio POR IMAGEN de pricing.yaml, no por
+  # el de token. Hoy eso da gemini (0.03) -> nano-banana-web (0.039) ->
+  # gpt-image-2 (0.04): el orden que preserva la ventana de la Codex Plus, sin
+  # cablearlo en ningún sitio. Sale de los precios.
   cheap:
-    require: [chat]
     rank_by: cost_asc
     # local es gratis pero lento; se deja como cola, no como cabeza de "cheap".
     exclude_family: [local]
 
+  # Para el sistema que genera de a una y espera el resultado. En imagen ordena
+  # por la latencia de imagen medida por el prober, que es otro orden de
+  # magnitud que la de chat (15-90 s contra menos de 2).
   fast:
-    require: [chat]
     rank_by: latency_asc
     exclude_family: [local]   # los locales rondan 5-17 s; no son "fast"
 
   # Calidad: curado. Orden por juicio, respaldable con evals. Se revisa cuando
   # el prober avisa un modelo nuevo.
+  # Sin `order` para imagen todavía: la calidad no sale de una sonda y no hay
+  # juicio hecho. En rutas de imagen resuelve vacío y cae a la cadena de
+  # `routing.yaml`, que es el comportamiento correcto — mejor eso que inventar
+  # un ranking de calidad que nadie midió.
   smart:
-    require: [chat]
     order:
       - claude-opus-4-6-thinking
       - gpt-5.5

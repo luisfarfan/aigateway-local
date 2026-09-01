@@ -15,6 +15,7 @@ Shutdown order (reverse):
   3. DB engine
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -173,6 +174,9 @@ async def lifespan(app: FastAPI):
     # local es opcional a propósito — sin él las cadenas siguen funcionando, sólo
     # pierden su último recurso.
     backends = None
+    # Se declara acá arriba y no dentro del `if`: se usa en el apagado, que
+    # corre aunque CLIProxyAPI esté deshabilitado.
+    gemini_web_backend = None
     if cliproxy_client is not None:
         from src.modules.backends.registry import BackendRegistry
 
@@ -186,7 +190,54 @@ async def lifespan(app: FastAPI):
             )
             log.info("ollama_backend_ready", base_url=settings.ollama_base_url)
 
-        backends = BackendRegistry(cloud=cliproxy_client, local=ollama_backend)
+        # Último recurso de imagen. Sólo si está encendido Y hay cookie: sin
+        # credencial el backend no puede hacer nada, y registrarlo vacío haría
+        # que la cadena gaste un intento para descubrirlo en cada petición.
+        if settings.enable_backend_gemini_web and settings.gemini_web_secure_1psid:
+            from src.modules.backends.gemini_web import GeminiWebBackend
+
+            gemini_web_backend = GeminiWebBackend(
+                secure_1psid=settings.gemini_web_secure_1psid,
+                secure_1psidts=settings.gemini_web_secure_1psidts,
+                timeout_s=settings.gemini_web_timeout_s,
+                cookie_cache_dir=str(
+                    Path(settings.gemini_web_cookie_cache_dir).expanduser()
+                ),
+            )
+            log.info("gemini_web_backend_ready")
+        elif settings.enable_backend_gemini_web:
+            log.warning("gemini_web_backend_skipped", reason="falta GEMINI_WEB_SECURE_1PSID")
+
+        backends = BackendRegistry(
+            cloud=cliproxy_client, local=ollama_backend, gemini_web=gemini_web_backend
+        )
+
+    # Vigilante de la sesión de la app web de Gemini. Va aparte del watchdog a
+    # propósito: el watchdog abre circuitos —protege la latencia— pero no avisa
+    # a nadie, y esta credencial no se recupera sola. Ver
+    # `backends/gemini_web_monitor.py`.
+    gemini_web_monitor_task = None
+    if gemini_web_backend is not None:
+        import asyncio
+
+        from src.modules.backends.gemini_web_monitor import run_forever as watch_session
+        from src.modules.notifications import NullNotifier, TelegramNotifier
+
+        notifier = (
+            TelegramNotifier(
+                bot_token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id
+            )
+            if settings.telegram_bot_token and settings.telegram_chat_id
+            else NullNotifier()
+        )
+        gemini_web_monitor_task = asyncio.create_task(
+            watch_session(
+                gemini_web_backend,
+                notifier,
+                interval_s=settings.gemini_web_session_check_interval_s,
+            )
+        )
+        log.info("gemini_web_monitor_started", notifier=notifier.name)
 
     # Watchdog de modelos. En la API y no en el worker porque basta con un
     # sondeador: el estado vive en Redis y lo comparten todos los procesos.
@@ -224,6 +275,10 @@ async def lifespan(app: FastAPI):
     log.info("gateway_stopping")
     if watchdog_task is not None:
         watchdog_task.cancel()
+    if gemini_web_monitor_task is not None:
+        gemini_web_monitor_task.cancel()
+    if gemini_web_backend is not None:
+        await gemini_web_backend.aclose()
     if cliproxy_client is not None:
         await cliproxy_client.aclose()
     await close_arq_pool()

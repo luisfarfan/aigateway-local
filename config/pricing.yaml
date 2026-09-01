@@ -52,6 +52,19 @@ families:
   local: {input: 0, output: 0}
 
 # Imagen: precio por imagen, no por token.
+# Aplica igual a generar y a editar: los dos devuelven una imagen y los dos se
+# tarifan por unidad. Con credencial OAuth el cobro real es cero y esto queda
+# como `cost_usd_equivalent` — ver `billing` arriba.
 images:
   gpt-image-2: {per_image: 0.04}
+  # Mismo precio que gpt-image-2 mientras no haya tarifa oficial contrastada.
+  # Se lista aunque sea estimado porque el modelo RESPONDE (verificado con una
+  # cuenta Codex Plus): sin entrada, cada llamada suma a
+  # `gateway_llm_unpriced_total` y su gasto desaparece del reporte de costos.
+  gpt-image-1.5: {per_image: 0.04}
   gemini-3.1-flash-image: {per_image: 0.03}
+  # App web de Gemini: va contra una suscripción, así que el costo marginal es
+  # cero. Se le pone el precio de lista de su equivalente por API para que
+  # aparezca en `cost_usd_equivalent` y se pueda comparar; `charged` lo decide
+  # el modo de credencial, que para esta vía no es `api_key`.
+  nano-banana-web: {per_image: 0.039}

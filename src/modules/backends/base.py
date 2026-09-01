@@ -17,7 +17,12 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from src.modules.providers.cliproxy.errors import CliproxyError
-from src.modules.providers.cliproxy.translate import EmbeddingResult, LLMResult, Message
+from src.modules.providers.cliproxy.translate import (
+    EmbeddingResult,
+    InputImage,
+    LLMResult,
+    Message,
+)
 
 # Alias con el nombre que corresponde al uso actual: estas clases nacieron para
 # CLIProxyAPI pero hoy son el vocabulario de errores de cualquier upstream.
@@ -60,6 +65,16 @@ class Backend(Protocol):
         self,
         prompt: str,
         *,
+        model: str,
+        size: str | None = None,
+        quality: str | None = None,
+    ) -> LLMResult: ...
+
+    async def image_edit(
+        self,
+        prompt: str,
+        *,
+        images: list[InputImage],
         model: str,
         size: str | None = None,
         quality: str | None = None,

@@ -217,3 +217,44 @@ async def test_un_cooldown_de_imagen_conserva_la_etiqueta_previa():
         previous_card={"capabilities": {"image": True}},  # antes SÍ generaba
     )
     assert card.capabilities["image"] is True  # se conservó, no se marcó false
+
+
+def test_un_barrido_barato_no_borra_la_latencia_de_imagen():
+    """REGRESIÓN. El barrido programado corre sin `--images` cada 6 h para no
+    gastar cuota. `carry_forward` heredaba el sí/no de la capacidad pero NO la
+    latencia medida, así que borraba `image_latency_s` y dejaba a `fast` sin con
+    qué ordenar la ruta de imagen: todos los modelos empataban en el default de
+    "sin medir".
+
+    Pasó de verdad: un barrido caro midió las latencias y el barato las borró
+    seis horas después.
+    """
+    from src.modules.routing.prober import ALWAYS_PROBED, ModelCard, carry_forward
+
+    previo = {
+        "gpt-image-2": {
+            "capabilities": {"image": True},
+            "image_latency_s": 12.5,
+        }
+    }
+    # Barrido barato: no sondeó imagen, así que la ficha viene vacía de eso.
+    card = ModelCard(id="gpt-image-2", owned_by="openai", family="openai", hosted="cloud")
+
+    carry_forward([card], previo, probed=ALWAYS_PROBED)
+
+    assert card.capabilities["image"] is True
+    assert card.image_latency_s == 12.5, "sin la latencia, `fast` no puede ordenar imagen"
+
+
+def test_una_medicion_nueva_le_gana_a_la_heredada():
+    """Heredar es para lo que NO se midió hoy. Si el barrido sí midió, ese dato
+    manda — si no, una latencia vieja sobreviviría para siempre."""
+    from src.modules.routing.prober import ALWAYS_PROBED, ModelCard, carry_forward
+
+    previo = {"m": {"capabilities": {"image": True}, "image_latency_s": 99.0}}
+    card = ModelCard(id="m", owned_by="o", family="f", hosted="cloud")
+    card.image_latency_s = 3.0   # medido en este barrido
+
+    carry_forward([card], previo, probed=ALWAYS_PROBED)
+
+    assert card.image_latency_s == 3.0

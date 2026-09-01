@@ -18,10 +18,10 @@ import json
 import time
 from contextlib import AsyncExitStack
 from dataclasses import replace
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -33,12 +33,12 @@ from src.modules.observability.recorder import AttemptRecord, Observation, obser
 from src.modules.providers.cliproxy.errors import (
     CliproxyError,
 )
-from src.modules.providers.cliproxy.translate import to_openai_chat_completion
+from src.modules.providers.cliproxy.translate import InputImage, to_openai_chat_completion
 from src.modules.routing import errors as routing_errors
 from src.modules.routing.breaker import CircuitBreaker
 from src.modules.routing.config import RoutingTable, load_routing
 from src.modules.routing.executor import NoCandidatesError, RouteResult, run_with_fallback
-from src.modules.routing.tiers import load_tiers
+from src.modules.routing.tiers import ROUTE_CAPABILITY, load_tiers
 from src.modules.structured.guard import InvalidStructuredOutput, call_with_guard
 
 log = structlog.get_logger(__name__)
@@ -212,6 +212,15 @@ async def list_models(request: Request) -> Any:
             # cloud: se devuelve lo que hay y se registra el hueco.
             log.warning("backends.local_models_failed", error=exc.message)
 
+    if registry.gemini_web_available:
+        try:
+            web = registry.resolve("geminiweb/_")
+            data.extend(await web.backend.models())
+        except Exception as exc:  # noqa: BLE001 — su librería no tipa sus fallos
+            # Mismo criterio que con el local: un backend opcional que no
+            # contesta no puede vaciar el inventario del resto.
+            log.warning("backends.gemini_web_models_failed", error=str(exc)[:150])
+
     # Los tiers también son valores válidos de `model`. Aparecen en el endpoint
     # estándar de descubrimiento para que un sistema los ENCUENTRE, no sólo su
     # desarrollador leyendo el README. `owned_by: proxima-tier` los distingue.
@@ -219,6 +228,19 @@ async def list_models(request: Request) -> Any:
         data.append({"id": name, "object": "model", "owned_by": "proxima-tier"})
 
     return {"object": "list", "data": data}
+
+
+# Con qué endpoint HTTP se usa cada ruta interna. El nombre de la ruta
+# (`image_edit`) es un detalle del routing; lo que un consumidor necesita saber
+# es a dónde mandar la petición.
+_ENDPOINT_BY_ROUTE = {
+    "chat": "POST /v1/chat/completions",
+    "structured": "POST /v1/chat/completions",
+    "websearch": "POST /v1/chat/completions",
+    "image": "POST /v1/images/generations",
+    "image_edit": "POST /v1/images/edits",
+    "embeddings": "POST /v1/embeddings",
+}
 
 
 @router.get("/v1/capabilities", summary="Qué sabe hacer cada modelo, y los tiers")
@@ -240,12 +262,25 @@ async def capabilities(request: Request) -> Any:
             }
             for mid, info in tiers.models.items()
         },
+        # Una entrada por RUTA, no sólo `chat`. Estaba cableado a chat, y con eso
+        # un consumidor que pregunta "¿qué me das para imagen?" no veía nada:
+        # `fast` y `cheap` ya resuelven cadenas de imagen, pero eran invisibles
+        # para quien descubre por programa en vez de leer el README. Una ruta que
+        # no califica devuelve `[]`, que es información útil —significa "acá este
+        # tier cae a la cadena por defecto"— y no un hueco.
         "tiers": {
             name: {
-                "chat": tiers.resolve(name, route="chat"),
+                **{route: tiers.resolve(name, route=route) for route in sorted(ROUTE_CAPABILITY)},
                 "unclassified": tiers.unclassified(name),
             }
             for name in tiers.policies
+        },
+        # Qué rutas existen y qué capacidad exige cada una. Sin esto, un sistema
+        # tiene que adivinar que `/v1/images/edits` se llama `image_edit` por
+        # dentro para interpretar el bloque de arriba.
+        "routes": {
+            route: {"requires": cap, "endpoint": _ENDPOINT_BY_ROUTE.get(route)}
+            for route, cap in sorted(ROUTE_CAPABILITY.items())
         },
     }
 
@@ -907,6 +942,103 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
             "created": 0,
             "model": result.model,
             "data": [_image_item(url, body.response_format) for url in result.images],
+            "usage": {
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "total_tokens": result.total_tokens,
+            },
+        }
+
+
+@router.post("/v1/images/edits", summary="Edición de imagen (image-to-image)")
+async def images_edits(
+    request: Request,
+    image: Annotated[list[UploadFile], File(description="Foto(s) de entrada")],
+    prompt: Annotated[str, Form()],
+    model: Annotated[str | None, Form()] = None,
+    size: Annotated[str | None, Form()] = None,
+    quality: Annotated[str | None, Form()] = None,
+    response_format: Annotated[str, Form()] = "b64_json",
+) -> Any:
+    """Recontextualiza una foto real en vez de inventar desde cero.
+
+    Es la mitad que faltaba del plano de imagen. Para un catálogo de ecommerce
+    las dos cosas son distintas y ninguna reemplaza a la otra: generar sirve
+    cuando el producto no existe todavía; editar es lo único que preserva la
+    identidad del producto que ya se fotografió.
+
+    Multipart y no JSON porque el contrato es el de OpenAI y ahí la imagen sube
+    como archivo. La foto puede repetirse (`image[]`) para dar varias
+    referencias a la vez.
+
+    Ojo con `size`: viaja al upstream pero no se cumple, y mandarlo empeora el
+    resultado. Medido con `gpt-image-2`: sin `size` la salida hereda la
+    proporción de la foto de entrada (1254x1254 → 1254x1254); pidiendo
+    `1024x1024` sobre esa misma foto salió 1402x1122. Lo sano es omitirlo y
+    recortar después si hace falta una proporción exacta.
+    """
+    registry = _backends(request)
+    table, breaker = _routing(request)
+    cands = _candidates(request, table, "image_edit", model)
+
+    inputs = [
+        InputImage(
+            content=await item.read(),
+            filename=item.filename or "image.png",
+            content_type=item.content_type or "image/png",
+        )
+        for item in image
+    ]
+
+    obs = Observation(
+        project=_project_of(request),
+        route="image_edit",
+        requested_model=model or (cands or ["?"])[0],
+        client_id=_client_id_of(request),
+    )
+
+    async with observe(obs):
+
+        async def attempt(candidate: str) -> Any:
+            resolved = _resolve(registry, candidate)
+            obs.family = str(await resolved.backend.family_of(resolved.model))
+            obs.meta["backend"] = resolved.backend.name
+            return await resolved.backend.image_edit(
+                prompt, images=inputs, model=resolved.model, size=size, quality=quality
+            )
+
+        try:
+            routed = await run_with_fallback(
+                attempt, route="image_edit", table=table, breaker=breaker, candidates=cands
+            )
+        except NoCandidatesError as exc:
+            obs.failed(
+                kind="no_candidates", message=str(exc), retryable=True, outcome="upstream_error"
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {"message": str(exc), "type": "no_candidates", "retryable": True}
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — toda la cadena falló
+            obs.failed(**_failure_fields(exc))
+            obs.meta["routing_exhausted"] = True
+            return _error_response(exc)
+
+        _annotate_routing(obs, routed)
+        result = routed.value
+
+        obs.prompt_tokens = result.prompt_tokens
+        obs.completion_tokens = result.completion_tokens
+        obs.image_count = len(result.images)
+        obs.meta["input_images"] = len(inputs)
+        obs.succeeded(model=result.model)
+
+        return {
+            "created": 0,
+            "model": result.model,
+            "data": [_image_item(url, response_format) for url in result.images],
             "usage": {
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
