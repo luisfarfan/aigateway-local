@@ -54,6 +54,12 @@ models:
   gemini-3.1-pro-low: {input: 1.25, output: 10.00}
   claude-sonnet-4-6: {input: 3.00, output: 15.00}
   claude-opus-4-6: {input: 15.00, output: 75.00}
+  # Respaldo: Vercel informa el costo real en cada respuesta y ese gana (ver
+  # `Observation.reported_cost`). Esto sólo se usa si algún día no lo manda.
+  # Jev cobra sólo la entrada.
+  typesafe-ai/jev: {input: 0.042, output: 0}
+  # El mismo Jev por OpenRouter, que también informa el costo (`usage.cost`).
+  typesafe/jev-1.13: {input: 0.042, output: 0}
 
 # Por familia, cuando el id exacto no está listado. Evita que un modelo nuevo
 # quede sin precio sólo por haberse renombrado.

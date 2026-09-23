@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from proxima_llm.errors import ProximaError
-from proxima_llm.types import Completion, Embeddings, Image, Source
+from proxima_llm.types import Completion, Embeddings, Evaluation, Image, Source
 
 Message = dict[str, Any]
 
@@ -181,5 +181,29 @@ def read_embeddings(payload: dict[str, Any]) -> Embeddings:
         vectors=[item.get("embedding") or [] for item in items],
         model=payload.get("model") or "",
         prompt_tokens=int(usage.get("prompt_tokens") or 0),
+        raw=payload,
+    )
+
+
+def evaluate_body(
+    state: str | dict[str, Any] | list[Any],
+    questions: dict[str, dict[str, Any]],
+    *,
+    model: str | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"state": state, "questions": questions}
+    if model:
+        body["model"] = model
+    return body
+
+
+def read_evaluation(payload: dict[str, Any]) -> Evaluation:
+    usage = payload.get("usage") or {}
+    proxima = payload.get("proxima") or {}
+    return Evaluation(
+        answers=payload.get("answers") or {},
+        model=payload.get("model") or "",
+        input_tokens=int(usage.get("inputTokens") or 0),
+        fell_back_from=proxima.get("fell_back_from"),
         raw=payload,
     )

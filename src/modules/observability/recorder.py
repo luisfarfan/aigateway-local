@@ -70,6 +70,10 @@ class Observation:
     # de pago. El día que se cargue una, el gasto real habría desaparecido del
     # reporte sin que nada lo señalara.
     auth_mode: str | None = None
+    # El costo que informó el upstream, cuando lo informa (Vercel AI Gateway lo
+    # hace en cada respuesta). Gana sobre la tabla: es lo que se cobró de verdad,
+    # promociones y descuentos incluidos, que `pricing.yaml` no puede conocer.
+    reported_cost: Cost | None = None
 
     response_model: str | None = None
     prompt_tokens: int = 0
@@ -107,6 +111,9 @@ class Observation:
         sirviendo por suscripción, y cobrar por el primero sería inventar un
         gasto que no ocurrió.
         """
+        if self.reported_cost is not None:
+            return self.reported_cost
+
         model = self.response_model or self.requested_model
         auth_mode = self.auth_mode or load_pricing().auth_mode_for(model)
 

@@ -271,12 +271,45 @@ async def lifespan(app: FastAPI):
         )
         log.info("watchdog_started", interval_s=settings.watchdog_interval_s)
 
+    # Evaluación. Independiente de CLIProxyAPI: Jev no pasa por ahí, así que el
+    # plano de evaluación funciona aunque el de chat esté apagado.
+    from src.modules.evaluation.registry import EvaluatorRegistry
+
+    vercel_evaluator = None
+    if settings.enable_backend_vercel and settings.ai_gateway_api_key:
+        from src.modules.evaluation.vercel import VercelEvaluator
+
+        vercel_evaluator = VercelEvaluator(
+            api_key=settings.ai_gateway_api_key,
+            base_url=settings.vercel_ai_gateway_base_url,
+            timeout_seconds=settings.vercel_ai_gateway_timeout_s,
+            zero_data_retention=settings.vercel_zero_data_retention,
+        )
+        log.info("vercel_evaluator_ready", zdr=settings.vercel_zero_data_retention)
+    elif settings.enable_backend_vercel:
+        log.warning("vercel_evaluator_skipped", reason="falta AI_GATEWAY_API_KEY")
+
+    openrouter_evaluator = None
+    if settings.enable_backend_openrouter and settings.openrouter_api_key:
+        from src.modules.evaluation.openrouter import OpenRouterEvaluator
+
+        openrouter_evaluator = OpenRouterEvaluator(
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            timeout_seconds=settings.openrouter_timeout_s,
+        )
+        log.info("openrouter_evaluator_ready")
+    elif settings.enable_backend_openrouter:
+        log.warning("openrouter_evaluator_skipped", reason="falta OPENROUTER_API_KEY")
+    evaluators = EvaluatorRegistry(vercel=vercel_evaluator, openrouter=openrouter_evaluator)
+
     # Attach shared state — accessible in routers via request.app.state.*
     app.state.provider_registry = registry
     app.state.arq_pool = arq_pool
     app.state.settings = settings
     app.state.cliproxy_client = cliproxy_client
     app.state.backends = backends
+    app.state.evaluators = evaluators
 
     log.info("gateway_started", host=settings.api_host, port=settings.api_port)
 
@@ -292,6 +325,10 @@ async def lifespan(app: FastAPI):
         await gemini_web_backend.aclose()
     if cliproxy_client is not None:
         await cliproxy_client.aclose()
+    if vercel_evaluator is not None:
+        await vercel_evaluator.aclose()
+    if openrouter_evaluator is not None:
+        await openrouter_evaluator.aclose()
     await close_arq_pool()
     await close_redis()
     await dispose_engine()

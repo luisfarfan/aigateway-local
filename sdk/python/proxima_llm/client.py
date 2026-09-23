@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from proxima_llm import _protocol as p
-from proxima_llm.types import Completion, Embeddings
+from proxima_llm.types import Completion, Embeddings, Evaluation
 
 # Una imagen de entrada: ruta en disco, bytes crudos, o `(nombre, bytes)` cuando
 # quien llama quiere controlar el nombre —y con él el tipo que se declara—.
@@ -217,6 +217,24 @@ class Gateway(_Base):
             await self._request("POST", "/v1/embeddings", p.embeddings_body(items, model=model))
         )
 
+    async def evaluate(
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: dict[str, dict[str, Any]],
+        *,
+        model: str | None = None,
+    ) -> Evaluation:
+        """Estado + preguntas tipadas → probabilidades (Jev). No genera texto.
+
+        ev = await gw.evaluate(
+            "Me cobraron dos veces",
+            {"refund": {"type": "boolean", "instructions": "¿Pide reembolso?"}},
+        )
+        ev.probability("refund")  # 0.98
+        """
+        body = p.evaluate_body(state, questions, model=model)
+        return p.read_evaluation(await self._request("POST", "/v1/evaluate", body))
+
     async def _request(
         self,
         method: str,
@@ -373,6 +391,17 @@ class SyncGateway(_Base):
         return p.read_embeddings(
             self._request("POST", "/v1/embeddings", p.embeddings_body(items, model=model))
         )
+
+    def evaluate(
+        self,
+        state: str | dict[str, Any] | list[Any],
+        questions: dict[str, dict[str, Any]],
+        *,
+        model: str | None = None,
+    ) -> Evaluation:
+        """Estado + preguntas tipadas → probabilidades (Jev). No genera texto."""
+        body = p.evaluate_body(state, questions, model=model)
+        return p.read_evaluation(self._request("POST", "/v1/evaluate", body))
 
     def _request(
         self,

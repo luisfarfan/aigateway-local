@@ -60,6 +60,12 @@ def create_app() -> FastAPI:
 
         app.include_router(openai_compat_router)
 
+    # Evaluación (Jev). Se monta siempre: sin backend configurado responde un
+    # error clasificado en vez de un 404 que haría creer que la ruta no existe.
+    from src.api.evaluation.router import router as evaluation_router
+
+    app.include_router(evaluation_router)
+
     # ── Static Metrics/Files ──────────────────────────────────────────────────
     app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
 

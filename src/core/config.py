@@ -203,6 +203,24 @@ class Settings(BaseSettings):
     # expirada — no hay nada que ganar preguntando cada minuto.
     gemini_web_session_check_interval_s: int = 1800
 
+    # Evaluación (Jev de TypeSafe AI) por Vercel AI Gateway: `POST /v1/evaluate`
+    # y `POST /typesafe/v1/systemone`. Apagado sin key: sin credencial el
+    # backend no puede hacer nada y cada petición gastaría un intento en
+    # descubrirlo.
+    enable_backend_vercel: bool = False
+    ai_gateway_api_key: str = ""
+    vercel_ai_gateway_base_url: str = "https://ai-gateway.vercel.sh"
+    vercel_ai_gateway_timeout_s: float = 20.0
+    # Zero Data Retention. Sólo planes Pro/Enterprise: con Hobby, Vercel
+    # rechaza la petición entera con 403. Se enciende cuando la cuenta lo permita.
+    vercel_zero_data_retention: bool = False
+    # Segunda vía a Jev, por OpenRouter. Mismo modelo y mismo precio; entra en
+    # la cadena `evaluate` para que Jev siga respondiendo si Vercel falla.
+    enable_backend_openrouter: bool = False
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api"
+    openrouter_timeout_s: float = 20.0
+
     # Aviso al operador cuando algo necesita una mano humana (hoy: la sesión de
     # la app web de Gemini). Sin token configurado no se manda nada y se
     # registra en el log; el gateway funciona igual.

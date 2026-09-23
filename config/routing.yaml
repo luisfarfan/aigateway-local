@@ -102,6 +102,19 @@ routes:
     # resultado que parece funcionar y no funciona. Queda fuera de la cadena.
     - ollama/bge-m3
     - ollama/qwen3-embedding:0.6b
+  # Evaluación: estado + preguntas tipadas → probabilidades, sin texto
+  # (`POST /v1/evaluate`, `POST /typesafe/v1/systemone`). Jev de TypeSafe AI
+  # por dos agregadores: si uno falla, se queda sin saldo o su key deja de
+  # servir, responde el otro.
+  #
+  # Vercel primero SÓLO porque es gratis hasta el 2026-09-25. Medido el
+  # 2026-09-23 (10 llamadas por lado, dos rondas): latencias parecidas, con
+  # OpenRouter igual o algo mejor (mediana 0.36 vs 0.62 s en la primera ronda;
+  # mínimo 0.30 vs 0.40 s). Mismo precio después de la promoción, así que
+  # pasado el 25 conviene volver a medir y poner primero al más rápido.
+  evaluate:
+    - vercel/typesafe-ai/jev
+    - openrouter/typesafe/jev-1.13
 
 # Qué fallos justifican probar otro modelo.
 #
@@ -137,6 +150,9 @@ watchdog:
     - image_edit
     # Un modelo de embeddings tampoco responde a una llamada de chat.
     - embeddings
+    # Ni uno de evaluación. Y peor: `vercel/…` no es un id de CLIProxyAPI, así
+    # que la sonda de chat fallaría siempre y abriría el circuito de Jev.
+    - evaluate
 
 # Estos tres valores son el camino POR DEFECTO, el que se usa cuando el upstream
 # no dice nada. Cuando sí lo dice —un 429 de Google trae `RetryInfo.retryDelay`

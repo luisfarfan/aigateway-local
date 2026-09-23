@@ -18,6 +18,7 @@ Think of it as a self-hosted OpenRouter: a unified API for LLMs, TTS, STT, image
 | 🎚️ **Routing por intención** | `fast`, `cheap`, `smart` — política sobre el mapa de capacidades, no una lista |
 | 💸 **Costo por proyecto** | quién gastó, cuánto, y si se pagó de verdad o fue suscripción |
 | 🖼️ **Imagen y edición** | generar desde texto, o recontextualizar una foto de producto |
+| 🧠 **Evaluación (Jev)** | estado + preguntas tipadas → probabilidades; Vercel con fallback a OpenRouter |
 | 🩺 **Se vigila solo** | circuit breaker, watchdog, prober de capacidades y aviso cuando algo necesita una mano |
 
 ---
@@ -644,7 +645,7 @@ de esta máquina.
   - [Autenticación](#autenticación) · [Chat](#chat) · [Búsqueda web](#búsqueda-web)
   - [Visión](#visión) · [Salida estructurada](#salida-estructurada) · [Imágenes](#imágenes)
   - [Streaming](#streaming) · [Function calling](#function-calling)
-  - [Embeddings](#embeddings) · [Modelos locales](#modelos-locales)
+  - [Embeddings](#embeddings) · [Evaluación (Jev)](#evaluación-jev) · [Modelos locales](#modelos-locales)
   - [Errores](#errores-y-reintentos)
 - 📦 [Plano de jobs `/api/v1/jobs`](#plano-de-jobs-apiv1jobs)
 - ⚙️ [Configuración](#configuración)
@@ -699,6 +700,8 @@ POST /v1/chat/completions     chat, búsqueda web, visión y salida estructurada
 POST /v1/images/generations   generación de imagen (desde texto)
 POST /v1/images/edits         edición de imagen (desde una foto, image-to-image)
 POST /v1/embeddings           vectores para búsqueda semántica y RAG
+POST /v1/evaluate             evaluación: estado + preguntas tipadas → probabilidades (Jev)
+POST /typesafe/v1/systemone   lo mismo, con la API de TypeSafe (para su SDK oficial)
 GET  /v1/models               inventario (cloud + local + tiers)
 GET  /v1/capabilities         qué sabe hacer cada modelo + a qué resuelve cada tier
 ```
@@ -1278,6 +1281,88 @@ una frase sin relación:
 (`search_document:`, `search_query:`). Sin ellos y con español da un resultado que
 **parece** funcionar y no funciona — por eso quedó fuera de la cadena.
 
+### Evaluación (Jev)
+
+Un modelo de **decisión**, no de texto: le pasás un estado (texto, objeto o lista) y
+preguntas tipadas, y devuelve una probabilidad por pregunta, sin generar prosa. Sirve
+para clasificar, rutear, moderar o aprobar sin parsear lo que escribe un LLM.
+Hoy lo sirve **Jev** de TypeSafe AI.
+
+```bash
+curl -X POST http://192.168.1.12:8000/v1/evaluate \
+  -H "Authorization: Bearer $CLAVE" -H "X-Proxima-Project: soporte" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "state": "Me cobraron dos veces la suscripción y quiero mi dinero YA.",
+    "questions": {
+      "refund":  {"type": "boolean", "instructions": "¿Pide un reembolso?"},
+      "team":    {"type": "choice", "instructions": "¿Qué equipo lo atiende?",
+                  "criteria": {"billing": "cobros y reembolsos", "technical": "errores"}},
+      "urgency": {"type": "score", "instructions": "¿Qué tan urgente?",
+                  "criteria": ["baja", "media", "alta"]}
+    }
+  }'
+```
+
+```json
+{"model": "typesafe-ai/jev",
+ "answers": {
+   "refund":  {"type": "boolean", "probability": 0.98},
+   "team":    {"type": "choice", "choice": "billing", "probabilities": {"billing": 1, "technical": 0}},
+   "urgency": {"type": "score", "score": 2, "probabilities": {"0": 0, "1": 0, "2": 1}}},
+ "usage": {"inputTokens": 393, "outputTokens": 62}}
+```
+
+| tipo | `criteria` | responde |
+|---|---|---|
+| `boolean` | opcional: `{"true": "...", "false": "..."}` | `probability` de que sea cierto |
+| `choice` | obligatorio: `{opción: descripción}`, hasta 255 | `choice` + `probabilities` de cada opción |
+| `score` | obligatorio: lista de 2 a 10 niveles, de menor a mayor | `score` (nivel esperado) + `probabilities` |
+
+Todas las preguntas se responden en paralelo en un solo viaje. Una pregunta mal
+formada se rechaza con **400** antes de llegar a ningún proveedor.
+
+**Dos dialectos, un solo camino.** `POST /v1/evaluate` usa la forma nativa de Vercel
+(`boolean` → `probability`). `POST /typesafe/v1/systemone` usa la de TypeSafe
+(`noul` → `noul`, `usage` en snake_case, `legend` en los `score`). Un sistema que ya
+usa el SDK oficial de TypeSafe sólo cambia su base URL a
+`http://192.168.1.12:8000/typesafe`. Los errores de esa ruta también salen en forma
+TypeSafe (`{"message", "error_type"}`).
+
+**Dos vías a Jev, con fallback** (`routes.evaluate` en `routing.yaml`):
+
+```yaml
+evaluate:
+  - vercel/typesafe-ai/jev         # Vercel AI Gateway (AI_GATEWAY_API_KEY)
+  - openrouter/typesafe/jev-1.13   # OpenRouter (OPENROUTER_API_KEY)
+```
+
+Si Vercel falla, se queda sin saldo o su key deja de servir, responde OpenRouter, y
+la respuesta lo dice en `proxima: {"fell_back_from", "served_by"}`. Una petición
+inválida **no** salta (el otro la rechazaría igual) y `X-Proxima-No-Fallback`
+recorta la cadena al primero. Para pedir una vía concreta, `"model"` acepta `jev`,
+`typesafe-ai/jev` (Vercel) o `typesafe/jev-1.13` (OpenRouter).
+
+Vercel va primero sólo porque es gratis hasta el 2026-09-25. Medido el 2026-09-23
+con 10 llamadas por vía: latencias parecidas, OpenRouter igual o algo mejor (mediana
+0.36 s contra 0.62 s en la ronda más limpia), y las dos con picos de 2 a 5 s que
+vienen de la carga de TypeSafe, no del agregador — Jev en sí tarda ~170 ms. Mismo
+precio después de la promoción ($0.042 por millón de tokens de entrada; la salida
+no se cobra), así que pasado el 25 conviene volver a medir y poner primero al más
+rápido.
+
+**Costo.** Los dos agregadores informan lo que cobraron en cada respuesta, y eso es lo
+que se registra por proyecto — no la tabla de `pricing.yaml`, que queda de respaldo.
+Durante la promoción de Vercel sale `cost_usd = 0` con el precio de lista en
+`cost_equivalent_usd`.
+
+**Zero Data Retention** (`VERCEL_ZERO_DATA_RETENTION=true`) sólo existe en los planes
+Pro/Enterprise de Vercel. Con Hobby, Vercel rechaza la petición **entera** con 403;
+por eso está apagado.
+
+**Timeouts del lado del cliente:** cada vía espera hasta 20 s. Con los picos medidos,
+un cliente con timeout de 1-2 s va a cortar llamadas que habrían respondido.
+
 ### Modelos locales
 
 Prefijo `ollama/`:
@@ -1663,6 +1748,13 @@ LLM_HISTORY_ENABLED=true               # escribir el histórico en Postgres
 WATCHDOG_ENABLED=true
 WATCHDOG_INTERVAL_S=900
 
+# Evaluación (Jev) — cada vía se apaga sola si falta su key
+ENABLE_BACKEND_VERCEL=true
+AI_GATEWAY_API_KEY=vck_...
+VERCEL_ZERO_DATA_RETENTION=false       # sólo planes Pro/Enterprise
+ENABLE_BACKEND_OPENROUTER=true
+OPENROUTER_API_KEY=sk-or-v1-...
+
 # Puertos remapeados: los de siempre están ocupados en esta máquina
 POSTGRES_PORT=5442
 MINIO_ENDPOINT=http://localhost:9010
@@ -1688,6 +1780,9 @@ gw.search("Precio del Bitcoin hoy").sources        # [Source(uri=..., title=...)
 gw.structured("clasifica esto", schema=SCHEMA).parsed
 gw.image("un cubo rojo").images[0].url             # data URI
 gw.embed(["texto uno", "texto dos"]).vectors      # para RAG; acepta un str suelto
+ev = gw.evaluate("Me cobraron dos veces",          # Jev: probabilidades, no texto
+                 {"refund": {"type": "boolean", "instructions": "¿Pide reembolso?"}})
+ev.probability("refund")                           # también .choice(k), .score(k)
 gw.models()
 
 # visión
@@ -2291,6 +2386,8 @@ Probado end-to-end contra el gateway expuesto en la red, con modelos reales:
 | cache, fallback declarado en la respuesta, watchdog | ✅ |
 | histórico en Postgres, métricas, trazas en Langfuse | ✅ |
 | SDK sync y async | ✅ |
+| evaluación con Jev por Vercel y por OpenRouter, en los dos dialectos (nativo y TypeSafe) | ✅ |
+| fallback Vercel → OpenRouter (forzado con una key de Vercel inválida) y costo informado por proyecto | ✅ |
 
 Sin verificar por mí: `video_assembly`, `autonomous_mission` y `text_embedding` —
 están instalados y registrados, pero no los he ejercitado.
