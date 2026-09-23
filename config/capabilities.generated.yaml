@@ -11,7 +11,7 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 2.56
+    chat_latency_s: 3.34
     image_latency_s: null
     errors:
       websearch: No hay ruta de websearch conocida para el modelo 'claude-opus-4-6-thinking'
@@ -27,7 +27,7 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 1.38
+    chat_latency_s: 2.15
     image_latency_s: null
     errors:
       vision: 'no acertó el color: ''**Roja**'''
@@ -44,7 +44,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 4.35
+    chat_latency_s: 2.07
     image_latency_s: null
     errors: {}
   gemini-3-flash:
@@ -58,7 +58,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 0.91
+    chat_latency_s: 11.88
     image_latency_s: null
     errors: {}
   gemini-3.1-flash-image:
@@ -69,11 +69,11 @@ models:
       chat: false
       embeddings: false
       image: false
-    chat_latency_s: 0.71
+    chat_latency_s: 2.88
     image_latency_s: null
     errors:
       chat: '/v1/chat/completions → 429: You have exhausted your capacity on this
-        model. Your quota will reset after 90h41m9s.'
+        model. Your quota will reset after 97h53m17s.'
   gemini-3.1-flash-lite:
     owned_by: antigravity
     family: antigravity
@@ -85,7 +85,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 0.75
+    chat_latency_s: 2.15
     image_latency_s: null
     errors: {}
   gemini-3.1-pro-low:
@@ -99,7 +99,20 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 2.57
+    chat_latency_s: 3.73
+    image_latency_s: null
+    errors: {}
+  gemini-3.5-flash-lite:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+      websearch: true
+    chat_latency_s: 3.38
     image_latency_s: null
     errors: {}
   gemini-3.6-flash-high:
@@ -113,7 +126,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 1.08
+    chat_latency_s: 7.06
     image_latency_s: null
     errors: {}
   gemini-3.7-flash-high:
@@ -127,7 +140,20 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 1.14
+    chat_latency_s: 3.38
+    image_latency_s: null
+    errors: {}
+  gemini-3.8-flash-high:
+    owned_by: antigravity
+    family: antigravity
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+      websearch: true
+    chat_latency_s: 2.66
     image_latency_s: null
     errors: {}
   gemini-pro-agent:
@@ -136,12 +162,12 @@ models:
     hosted: cloud
     capabilities:
       chat: true
-      tools: false
+      tools: true
       vision: true
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 3.1
+    chat_latency_s: 4.26
     image_latency_s: null
     errors: {}
   geminiweb/nano-banana-web:
@@ -149,58 +175,13 @@ models:
     family: unknown
     hosted: cloud
     capabilities:
-      chat: true
-      tools: false
-      vision: false
-      embeddings: false
-      websearch: false
-    chat_latency_s: 11.49
-    image_latency_s: null
-    errors:
-      tools: la app web de Gemini no soporta tools ni salida estructurada; el routing
-        debe probar otro candidato
-      vision: 'no acertó el color: ''Morado'''
-  gpt-5.3-codex-spark:
-    owned_by: openai
-    family: openai
-    hosted: cloud
-    capabilities:
       chat: false
       embeddings: false
-      image: false
-    chat_latency_s: 1.36
+    chat_latency_s: 2.56
     image_latency_s: null
     errors:
-      chat: /v1/chat/completions → 400
-  gpt-5.4:
-    owned_by: openai
-    family: openai
-    hosted: cloud
-    capabilities:
-      chat: true
-      tools: true
-      vision: false
-      embeddings: false
-      websearch: true
-      image: false
-    chat_latency_s: 1.79
-    image_latency_s: null
-    errors:
-      vision: 'no acertó el color: ''Roja'''
-  gpt-5.4-mini:
-    owned_by: openai
-    family: openai
-    hosted: cloud
-    capabilities:
-      chat: true
-      tools: true
-      vision: true
-      embeddings: false
-      websearch: true
-      image: false
-    chat_latency_s: 3.36
-    image_latency_s: null
-    errors: {}
+      chat: 'la cookie de la app web de Gemini no autentica (sesión expirada o revocada):
+        correr `python scripts/gemini_web_login.py`'
   gpt-5.5:
     owned_by: openai
     family: openai
@@ -212,7 +193,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 2.82
+    chat_latency_s: 2.14
     image_latency_s: null
     errors: {}
   gpt-5.6-luna:
@@ -226,7 +207,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 4.79
+    chat_latency_s: 2.65
     image_latency_s: null
     errors: {}
   gpt-5.6-sol:
@@ -240,7 +221,7 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 2.5
+    chat_latency_s: 2.15
     image_latency_s: null
     errors: {}
   gpt-5.6-terra:
@@ -254,7 +235,47 @@ models:
       embeddings: false
       websearch: true
       image: false
-    chat_latency_s: 3.18
+    chat_latency_s: 2.05
+    image_latency_s: null
+    errors: {}
+  gpt-6-astra:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+      websearch: true
+    chat_latency_s: 2.36
+    image_latency_s: null
+    errors: {}
+  gpt-6-luna:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: false
+      embeddings: false
+      websearch: true
+    chat_latency_s: 1.84
+    image_latency_s: null
+    errors:
+      vision: 'no acertó el color: ''Roja'''
+  gpt-6-sol:
+    owned_by: openai
+    family: openai
+    hosted: cloud
+    capabilities:
+      chat: true
+      tools: true
+      vision: true
+      embeddings: false
+      websearch: true
+    chat_latency_s: 5.44
     image_latency_s: null
     errors: {}
   gpt-image-1.5:
@@ -294,10 +315,11 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 0.94
+    chat_latency_s: 2.08
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Desconocido'''
+      vision: 'no acertó el color: ''No puedo ver la imagen que mencionas. Si me la
+        describes o m'''
       websearch: No hay ruta de websearch conocida para el modelo 'gpt-oss-120b-medium'
         (antigravity)
   ollama/bge-m3:latest:
@@ -323,12 +345,12 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 6.08
+    chat_latency_s: 4.85
     image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:6.7b
         does not support tools'
-      vision: 'no acertó el color: ''Lo siento, como asistente'''
+      vision: 'no acertó el color: ''Lo siento, pero como asistent'''
   ollama/deepseek-coder:latest:
     owned_by: ollama
     family: local
@@ -340,12 +362,12 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 1.94
+    chat_latency_s: 2.04
     image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/deepseek-coder:latest
         does not support tools'
-      vision: 'no acertó el color: ''```plaintext\nImagen no tiene'''
+      vision: 'no acertó el color: ''Lo siento, pero no parece'''
   ollama/gemma:7b:
     owned_by: ollama
     family: local
@@ -357,7 +379,7 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 8.22
+    chat_latency_s: 7.08
     image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/gemma:7b
@@ -374,7 +396,7 @@ models:
       embeddings: false
       websearch: false
       image: false
-    chat_latency_s: 14.16
+    chat_latency_s: 14.32
     image_latency_s: null
     errors:
       vision: 'no acertó el color: '''''
@@ -390,10 +412,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 9.99
+    chat_latency_s: 7.41
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''No puedo describir imágenes. ¿N'''
+      vision: 'no acertó el color: ''Azul.'''
   ollama/llama3:latest:
     owned_by: ollama
     family: local
@@ -405,7 +427,7 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 6.9
+    chat_latency_s: 6.62
     image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/llama3:latest
@@ -422,10 +444,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 6.14
+    chat_latency_s: 5.52
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: '' El color de la imagen no pare'''
+      vision: 'no acertó el color: " The color of the image ''img-"'
   ollama/nomic-embed-text:latest:
     owned_by: ollama
     family: local
@@ -450,12 +472,12 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.52
+    chat_latency_s: 4.02
     image_latency_s: null
     errors:
       tools: 'ollama/v1/chat/completions → 400: registry.ollama.ai/library/phi3:mini
         does not support tools'
-      vision: 'no acertó el color: ''Verde'''
+      vision: 'no acertó el color: ''\nCafé'''
   ollama/qwen2.5-coder:7b:
     owned_by: ollama
     family: local
@@ -463,13 +485,14 @@ models:
     capabilities:
       chat: true
       tools: false
-      vision: true
+      vision: false
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 3.71
+    chat_latency_s: 7.39
     image_latency_s: null
-    errors: {}
+    errors:
+      vision: 'no acertó el color: ''Azul'''
   ollama/qwen2.5-coder:latest:
     owned_by: ollama
     family: local
@@ -481,10 +504,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 8.12
+    chat_latency_s: 8.5
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Verde'''
+      vision: 'no acertó el color: ''La imagen no está disponible para que pueda'''
   ollama/qwen2.5:3b:
     owned_by: ollama
     family: local
@@ -496,10 +519,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.03
+    chat_latency_s: 4.59
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Azul'''
+      vision: 'no acertó el color: ''Imagen'''
   ollama/qwen2.5:7b:
     owned_by: ollama
     family: local
@@ -511,10 +534,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.25
+    chat_latency_s: 5.09
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Azul'''
+      vision: 'no acertó el color: ''No puedo ver la imagen, pero si'''
   ollama/qwen2.5:latest:
     owned_by: ollama
     family: local
@@ -526,10 +549,10 @@ models:
       embeddings: true
       websearch: false
       image: false
-    chat_latency_s: 4.99
+    chat_latency_s: 10.52
     image_latency_s: null
     errors:
-      vision: 'no acertó el color: ''Sin poder ver la imagen, no puedo'''
+      vision: 'no acertó el color: ''Verde'''
   ollama/qwen3-embedding:0.6b:
     owned_by: ollama
     family: local
@@ -538,7 +561,7 @@ models:
       chat: false
       embeddings: true
       image: false
-    chat_latency_s: 0.05
+    chat_latency_s: 0.06
     image_latency_s: null
     errors:
       chat: 'ollama/v1/chat/completions → 400: "qwen3-embedding:0.6b" does not support
