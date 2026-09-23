@@ -22,7 +22,10 @@ dependencies = [
     "jsonschema>=4.20.0",           # valida la salida estructurada del guard
 
     # ORM / DB
-    "sqlmodel>=0.0.21",
+    # <0.0.45: desde esa versión sqlmodel rechaza datetimes sin zona horaria al
+    # escribir, y los modelos guardan UTC naive (`jobs/models.py::_utcnow`).
+    # Con 0.0.45+ falla crear jobs y artefactos.
+    "sqlmodel>=0.0.21,<0.0.45",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.29.0",           # async driver (runtime)
     "psycopg2-binary>=2.9.0",    # sync driver (Alembic migrations only)
