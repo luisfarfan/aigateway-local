@@ -4,7 +4,7 @@
 ![fastapi](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
 ![postgres](https://img.shields.io/badge/Postgres-Alembic-4169E1?logo=postgresql&logoColor=white)
 ![redis](https://img.shields.io/badge/Redis-ARQ-DC382D?logo=redis&logoColor=white)
-![tests](https://img.shields.io/badge/tests-301%20passing-success)
+![tests](https://img.shields.io/badge/tests-347%20passing-success)
 ![openai-compatible](https://img.shields.io/badge/API-OpenAI--compatible-412991?logo=openai&logoColor=white)
 
 A self-hosted multimodal AI gateway — runs on your Ubuntu machine and accepts inference requests from any HTTP client (MacBook, another server, etc.).
