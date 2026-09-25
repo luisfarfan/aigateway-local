@@ -644,6 +644,7 @@ de esta máquina.
 - ⚡ [Plano síncrono `/v1/*`](#plano-síncrono-v1)
   - [Autenticación](#autenticación) · [Chat](#chat) · [Búsqueda web](#búsqueda-web)
   - [Visión](#visión) · [Salida estructurada](#salida-estructurada) · [Imágenes](#imágenes)
+    · [Procedencia de las imágenes](#procedencia-generada-vs-encontrada-en-la-web)
   - [Streaming](#streaming) · [Function calling](#function-calling)
   - [Embeddings](#embeddings) · [Evaluación (Jev)](#evaluación-jev) · [Modelos locales](#modelos-locales)
   - [Errores](#errores-y-reintentos)
@@ -940,14 +941,24 @@ Respuesta, en la forma que pidas con `response_format` (default OpenAI: `b64_jso
 
 ```json
 // response_format: "b64_json" (default) → base64 pelado
-{"model": "gemini-3.1-flash-image", "data": [{"b64_json": "/9j/4AAQ..."}]}
+{"model": "gemini-3.1-flash-image",
+ "data": [{"b64_json": "/9j/4AAQ...", "proxima_origin": "generated"}]}
 // response_format: "url" → data-URI
-{"model": "gemini-3.1-flash-image", "data": [{"url": "data:image/jpeg;base64,/9j/4AAQ..."}]}
+{"model": "gemini-3.1-flash-image",
+ "data": [{"url": "data:image/jpeg;base64,/9j/4AAQ...", "proxima_origin": "generated"}]}
 ```
 
 Por debajo hay dos vías incompatibles y el gateway las esconde: Gemini entrega la
 imagen **dentro de un mensaje de chat**, mientras que los modelos de OpenAI usan
 `/v1/images/generations` con base64 pelado.
+
+**Un modelo de imagen también funciona por `/v1/chat/completions`.** Es lo que
+hace un cliente que habla OpenAI y no distingue endpoints, así que el gateway lo
+soporta: si el modelo pedido está en una cadena de imagen, la petición se enruta
+a la cadena de imagen y la respuesta trae la imagen en `message.images[]`. Antes
+caía en la cadena de chat —toda de texto— y el primer fallo la degradaba a un
+modelo que contestaba "soy un modelo de lenguaje, no puedo generar imágenes".
+Con `stream: true` devuelve 400: una imagen llega entera o no llega.
 
 **La imagen tarda mucho más que el chat** — medido, entre 30 s y 148 s para la misma
 petición según la carga de arriba. Por eso tiene su propio timeout
@@ -956,6 +967,93 @@ gastando la cuota sin traer nada.
 
 Para lotes o cuando no quieras esperar, usa el [plano de jobs](#plano-de-jobs-apiv1jobs):
 la imagen queda como artefacto en MinIO con URL firmada.
+
+#### Procedencia: generada vs. encontrada en la web
+
+**Toda imagen que salga de este gateway dice de dónde vino.** No es un detalle
+de contabilidad: decide si la podés publicar.
+
+```json
+"proxima_origin": "generated"   // la creó el modelo. Es tuya
+"proxima_origin": "web"         // es una fotografía de un tercero
+```
+
+De dónde sale la segunda: `geminiweb/nano-banana-web` entra por la app web de
+Gemini, y esa app, cuando no puede generar, **ofrece buscar imágenes en
+internet**. Antes esas fotos llegaban por el mismo campo que las generadas, con
+HTTP 200 y sin ninguna marca. Medido contra la instancia — pidiendo "fotos
+reales de la torre Eiffel" con la cuota agotada:
+
+| Origen | Qué es |
+|---|---|
+| `upload.wikimedia.org` | Wikimedia Commons: libre, **pero la licencia varía por archivo y casi siempre exige atribución** |
+| `c8.alamy.com` | Agencia de stock **comercial**. Con marca de agua. Se paga |
+| `quiltripping.com` | Blog personal. Copyright del autor, sin licencia declarada |
+
+Publicar eso en una ficha de producto es un problema de licencia, no de calidad.
+
+**Por eso el default es fallar.** Una respuesta sin ninguna imagen generada se
+trata como fallo reintentable: la cadena salta al siguiente candidato
+(`gpt-image-2`) en vez de entregar algo que no se pidió.
+
+```json
+{"error": {"message": "el modelo no generó ninguna imagen: devolvió 1 de una
+  búsqueda web (upload.wikimedia.org), que son fotografías de terceros y no obra
+  del modelo. Para recibirlas igualmente, mandá la cabecera
+  X-Proxima-Allow-Web-Images: 1", "type": "upstream_unavailable"}}
+```
+
+Se eligió opt-in y no "etiquetar y seguir sirviendo" por una razón: etiquetar
+sin cambiar el default sólo arregla al cliente que lee la etiqueta, y el que más
+lo necesita es justamente el que no sabe que existe.
+
+#### Pedirlas a propósito
+
+Si tu pipeline las quiere —como candidatas a filtrar, no como entregables—:
+
+```bash
+curl -X POST http://192.168.1.12:8000/v1/images/generations \
+  -H "Authorization: Bearer $CLAVE" -H "X-Proxima-Project: mi-pipeline" \
+  -H "X-Proxima-Allow-Web-Images: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "geminiweb/nano-banana-web", "prompt": "Muéstrame fotos reales de la torre Eiffel"}'
+```
+
+Cada item trae entonces con qué auditarla:
+
+```json
+{ "b64_json": "...",
+  "proxima_origin": "web",
+  "proxima_source_url": "https://upload.wikimedia.org/.../Eiffel_Tower_Paris_01.JPG",
+  "proxima_title": "[Image 1]",
+  "proxima_alt": "real photos Eiffel Tower Paris France" }
+```
+
+`proxima_source_url` es **la URL del sitio de origen**, no un proxy de Google —
+verificado. Es lo que permite filtrar por dominio antes de mirar la imagen:
+`alamy.com`, `shutterstock.com` y compañía se descartan sin más. `title` viene
+genérico (`[Image N]`) y `alt` es un eco de la consulta; el campo con valor es
+la URL.
+
+Las generadas llevan `proxima_origin: "generated"` y **ninguna URL**: la que
+tienen apunta al almacenamiento interno del proveedor y no identifica
+procedencia alguna, así que no se inventa un campo que no significaría nada.
+
+Tres límites antes de construir sobre esto:
+
+1. **No es una API de búsqueda.** Es un efecto colateral de la app de chat.
+   Aparece sólo si el prompt le da pie —"muéstrame fotos reales de X" buscó,
+   "genera una imagen de X" no— y no controlás cuántas devuelve, ni el tamaño,
+   ni hay paginación.
+2. **No es determinista.** El mismo prompt puede generar un día y buscar al
+   otro, según cómo esté la cuota. Tu pipeline no puede depender de adivinar
+   cuál le tocó: por eso el default falla en vez de entregar lo que sea.
+3. **Es ingeniería inversa.** Sin contrato de API, se rompe cuando Google
+   cambie la app web.
+
+Sirven como **fuente de referencias**; no como entregable publicable. Quién
+puede usar qué es una decisión de política que la procedencia hace auditable,
+pero no resuelve.
 
 ### Edición de imagen (image-to-image)
 
@@ -1015,6 +1113,20 @@ No es una API: es la app web de Gemini manejada por
 [`gemini_webapi`](https://github.com/HanaokaYuzu/Gemini-API), con la cookie de
 sesión del navegador. Verificado end-to-end por este gateway — devolvió un JPEG
 de 2048x2048 editando desde una foto.
+
+**Su cuota de imagen es DIARIA y se repone a medianoche UTC.** No llega como un
+429 ni como una cabecera: la app lo dice en prosa, y cambiando el verbo entre
+respuestas — *"hoy no puedo **crear** más imágenes"*, *"hoy no puedo **generar**
+más imágenes"*, ambas capturadas con horas de diferencia. El gateway lo
+reconoce y abre el circuito **hasta medianoche UTC** en vez de reintentar cada
+dos minutos algo que vuelve mañana.
+
+Cuántas imágenes aguanta: **no es un número fijo y no se puede planificar**. Del
+histórico de este gateway, imágenes servidas por día: 96, 95, 63, 60, 38, 33,
+25, 18. Google estrangula según carga y según cómo vea la cuenta. Tratalo como
+capacidad oportunista, nunca como cuota comprometida. Y ojo: ese histórico
+cuenta *respuestas con imagen*, que hasta hace poco incluían las de la web —
+ver [Procedencia](#procedencia-generada-vs-encontrada-en-la-web).
 
 Para encenderlo:
 
@@ -2468,11 +2580,21 @@ Probado end-to-end contra el gateway expuesto en la red, con modelos reales:
 | cache, fallback declarado en la respuesta, watchdog | ✅ |
 | histórico en Postgres, métricas, trazas en Langfuse | ✅ |
 | SDK sync y async | ✅ |
+| procedencia de imagen (`generated` vs `web`), con la URL de origen real | ✅ |
+| un modelo de imagen pedido por `/v1/chat/completions` se enruta a la cadena de imagen | ✅ |
+| cuota diaria de la app web de Gemini: detectada y circuito abierto hasta medianoche UTC | ✅ |
 | evaluación con Jev por Vercel y por OpenRouter, en los dos dialectos (nativo y TypeSafe) | ✅ |
 | fallback Vercel → OpenRouter (forzado con una key de Vercel inválida) y costo informado por proyecto | ✅ |
 
 Sin verificar por mí: `video_assembly`, `autonomous_mission` y `text_embedding` —
 están instalados y registrados, pero no los he ejercitado.
+
+**Sin verificar, y conviene saberlo:** si la búsqueda de imágenes web de
+`geminiweb/` está disponible *siempre* o sólo cuando la cuota de generación se
+agotó. Todas las capturas se hicieron con la cuota ya agotada. La librería no
+expone ninguna perilla para elegir —`generate_content()` no tiene un
+`search_images=`— así que lo decide Gemini leyendo el prompt; lo que no se midió
+es si la decisión cambia con cuota disponible.
 
 No instalados: `diffusers`/torch (imagen y video locales), `TTS`, `faster-whisper`.
 
