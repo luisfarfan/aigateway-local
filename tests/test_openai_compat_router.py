@@ -1186,3 +1186,103 @@ async def test_se_puede_desactivar_la_exigencia_sin_desplegar_codigo():
         assert response.status_code == 200
     finally:
         app.state.settings.llm_require_project = True
+
+
+# ─── Un modelo de imagen pedido por el endpoint de chat ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_modelo_de_imagen_por_chat_no_cae_a_la_cadena_de_texto():
+    """Bug reportado por un cliente: pedir `gemini-3.1-flash-image` por
+    `/v1/chat/completions` respondía `gemini-3-flash` —un modelo de TEXTO—
+    diciendo "soy un modelo de lenguaje, no puedo generar imágenes" y sugiriendo
+    otras herramientas.
+
+    La causa era que la ruta se elegía por la forma de la petición y nunca por
+    el modelo, así que un modelo de imagen caía en la cadena de chat, que es
+    toda de texto. Un fallback sólo sirve si el sustituto puede hacer el
+    trabajo.
+    """
+    fake = FakeCliproxyClient(
+        LLMResult(text="", model="gemini-3.1-flash-image", images=["data:image/png;base64,QUJD"])
+    )
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "gemini-3.1-flash-image",
+            "messages": [{"role": "user", "content": "un gato astronauta"}],
+        },
+    )
+
+    assert response.status_code == 200
+    # Lo decisivo: se llamó a `image`, no a `chat`.
+    assert fake.calls == ["image"]
+    mensaje = response.json()["choices"][0]["message"]
+    assert mensaje["images"][0]["image_url"]["url"] == "data:image/png;base64,QUJD"
+
+
+@pytest.mark.asyncio
+async def test_un_modelo_de_texto_sigue_yendo_a_chat():
+    """La contraparte del test de arriba: el desvío tiene que ser quirúrgico.
+    Si además mandara a `image` lo que no es de imagen, rompería todo el chat."""
+    fake = FakeCliproxyClient()
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={"model": "gemini-3-flash", "messages": [{"role": "user", "content": "hola"}]},
+    )
+    assert response.status_code == 200
+    assert fake.calls == ["chat"]
+
+
+@pytest.mark.asyncio
+async def test_el_prompt_de_imagen_sale_del_ultimo_turno_del_usuario():
+    """`backend.image` recibe un string, no una conversación. Se toma el último
+    turno del usuario: mandar la conversación entera concatenada metería el
+    texto del asistente dentro del prompt de la imagen."""
+    capturado: dict[str, str] = {}
+
+    class FakeConPrompt(FakeCliproxyClient):
+        async def image(self, prompt: str, **_: Any) -> LLMResult:
+            capturado["prompt"] = prompt
+            return await self._answer("image")
+
+    fake = FakeConPrompt(LLMResult(text="", model="m", images=["data:image/png;base64,QQ=="]))
+    await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "gemini-3.1-flash-image",
+            "messages": [
+                {"role": "user", "content": "hola"},
+                {"role": "assistant", "content": "¿qué querés?"},
+                {"role": "user", "content": "un gato astronauta"},
+            ],
+        },
+    )
+    assert capturado["prompt"] == "un gato astronauta"
+
+
+@pytest.mark.asyncio
+async def test_pedir_imagen_en_streaming_es_400_y_no_una_degradacion():
+    """Una imagen llega entera o no llega. Antes esto caía al streaming de chat
+    —o sea a la cadena de texto— con el mismo final equivocado."""
+    fake = FakeCliproxyClient()
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "gemini-3.1-flash-image",
+            "messages": [{"role": "user", "content": "x"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["type"] == "invalid_request"
+    # Y sobre todo: no se llamó a NINGÚN modelo.
+    assert fake.calls == []

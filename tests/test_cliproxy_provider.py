@@ -352,3 +352,35 @@ async def test_image_edit_sin_foto_falla_con_un_mensaje_util(no_storage):
     assert result.success is False
     assert "image_key" in (result.error_message or "")
     assert fake.calls == []
+
+
+# ─── Timeout de generación de imagen ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_generar_imagen_usa_el_timeout_largo_y_no_el_de_chat():
+    """Bug medido: `image()` no pasaba `timeout_s`, así que heredaba el de chat
+    (120 s). Por Gemini la generación sale por `/v1/chat/completions` y tarda
+    20-90 s, con picos por encima de 120 — la petición se cortaba a mitad de
+    generación y el routing saltaba con `upstream_timeout` a un modelo de
+    TEXTO, sin que el de imagen hubiera fallado en nada.
+
+    `image_edit()` ya lo hacía bien; esto empareja las dos.
+    """
+    from src.modules.providers.cliproxy.client import CliproxyClient
+
+    visto: dict[str, Any] = {}
+
+    client = CliproxyClient(
+        base_url="http://fake", api_key="k", timeout_seconds=120.0, image_timeout_seconds=420.0
+    )
+
+    async def fake_request(method: str, path: str, body: Any, timeout_s: float | None = None):
+        visto["timeout_s"] = timeout_s
+        return {"choices": [{"message": {"content": "", "images": [{"url": PNG_DATA_URI}]}}]}
+
+    client._request = fake_request  # type: ignore[assignment]
+    await client.image("un gato", model="gemini-3.1-flash-image")
+    await client.aclose()
+
+    assert visto["timeout_s"] == 420.0

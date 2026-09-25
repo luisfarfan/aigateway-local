@@ -793,7 +793,19 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
     table, breaker = _routing(request)
     structured = _json_schema_of(body.response_format)
     websearch = _wants_websearch(body.tools)
-    route = "structured" if structured else ("websearch" if websearch else "chat")
+    # La ruta la decide la FORMA de la petición... salvo que el modelo pedido sea
+    # de imagen. Ese caso hay que atraparlo acá o la petición cae en la cadena de
+    # chat, que es toda de texto: medido, pedir `gemini-3.1-flash-image` por este
+    # endpoint terminaba respondiendo `gemini-3-flash` con un "soy un modelo de
+    # texto, no puedo generar imágenes" y una lista de sugerencias para ir a
+    # usar otra herramienta. Un fallback sólo sirve si el sustituto puede hacer
+    # el trabajo; degradar imagen a texto es devolver algo que no se pidió.
+    genera_imagen = bool(body.model) and body.model in table.image_models()
+    route = (
+        "image"
+        if genera_imagen
+        else ("structured" if structured else ("websearch" if websearch else "chat"))
+    )
     cands = _candidates(request, table, route, body.model)
 
     obs = Observation(
@@ -802,6 +814,32 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
         requested_model=body.model or (cands or ["?"])[0],
         client_id=_client_id_of(request),
     )
+
+    if genera_imagen and body.stream:
+        # Una imagen no se entrega por partes: llega entera o no llega. Antes
+        # esto caía al streaming de chat, o sea a la cadena de texto, con el
+        # mismo final equivocado. Un 400 explícito es peor experiencia que
+        # funcionar, pero mejor que una respuesta que parece buena y no lo es.
+        obs.failed(
+            kind="invalid_request",
+            message="la generación de imagen no admite streaming",
+            retryable=False,
+            outcome="invalid_request",
+        )
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": (
+                        f"el modelo {body.model!r} genera imágenes y eso no se puede "
+                        "transmitir por streaming: repetí la petición con "
+                        "`stream: false`, o usá POST /v1/images/generations"
+                    ),
+                    "type": "invalid_request",
+                    "retryable": False,
+                }
+            },
+        )
 
     if body.stream:
         return await _stream_guarded(request, body, obs, structured, websearch)
@@ -833,6 +871,20 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
                 )
 
             call = attempt_chat
+
+        if genera_imagen:
+            # El prompt de una petición de imagen es el texto del último turno
+            # del usuario; el resto de la conversación no aporta nada a una
+            # generación y `backend.image` sólo acepta un string.
+            prompt = _last_user_text(body.messages)
+
+            async def attempt_image(model: str) -> Any:
+                resolved = _resolve(registry, model)
+                obs.family = str(await resolved.backend.family_of(resolved.model))
+                obs.meta["backend"] = resolved.backend.name
+                return await resolved.backend.image(prompt, model=resolved.model)
+
+            call = attempt_image
 
         try:
             routed = await run_with_fallback(
@@ -894,6 +946,31 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
                 "served_by": routed.model,
             }
         return payload
+
+
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """El prompt de imagen: el texto del último turno del usuario.
+
+    `content` puede venir como string o como lista de bloques (el formato
+    multimodal de OpenAI); se juntan sólo los bloques de texto. Si no hay ningún
+    turno de usuario se cae al último mensaje, que es mejor que mandar vacío y
+    recibir una imagen de nada.
+    """
+    for message in reversed(messages or []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            partes = [
+                str(b.get("text") or "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            if texto := " ".join(p for p in partes if p).strip():
+                return texto
+    return str((messages or [{}])[-1].get("content") or "").strip()
 
 
 def _image_item(data_uri: str, response_format: str) -> dict[str, str]:

@@ -25,6 +25,10 @@ DEFAULT_ROUTING_PATH = Path(__file__).resolve().parents[3] / "config" / "routing
 # se pierde el fallback, no el servicio.
 _FALLBACK_ON = ("upstream_unavailable", "upstream_timeout", "no_credential", "invalid_output")
 
+# Las rutas cuyos candidatos generan imágenes. Vive acá y no en `tiers.py` para
+# que `RoutingTable` no dependa del resolvedor de tiers.
+IMAGE_ROUTES = ("image", "image_edit")
+
 
 @dataclass(frozen=True)
 class BreakerPolicy:
@@ -60,6 +64,20 @@ class RoutingTable:
                 continue
             probeable.update(chain)
         return sorted(probeable)
+
+    def image_models(self) -> frozenset[str]:
+        """Modelos que esta configuración considera de imagen.
+
+        Sale de las cadenas de imagen y no del mapa de capacidades a propósito:
+        el prober sólo marca `image: true` si se corrió con `--images`, que es
+        caro y no se hace en cada barrido. Hoy `gemini-3.1-flash-image` figura
+        en el mapa con `image: false` por eso — fiarse del mapa lo dejaría
+        clasificado como modelo de texto, que es justo el error que esto evita.
+
+        La cadena, en cambio, es curada: si alguien puso un modelo en `image` o
+        en `image_edit`, es porque genera imágenes.
+        """
+        return frozenset(m for r in IMAGE_ROUTES for m in self.routes.get(r, ()))
 
     def candidates(self, route: str, requested: str | None = None) -> list[str]:
         """Modelos a probar, en orden y sin repetidos.

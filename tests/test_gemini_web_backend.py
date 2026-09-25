@@ -387,3 +387,77 @@ def test_la_generacion_prefiere_lo_gratis_y_reserva_la_cuota_medida():
     cadena = load_routing().candidates("image")
     assert cadena[-1] == "gpt-image-2", cadena
     assert cadena.index("geminiweb/nano-banana-web") < cadena.index("gpt-image-2"), cadena
+
+
+# ─── Cuota diaria de imagen ───────────────────────────────────────────────────
+
+
+def test_la_cuota_diaria_agotada_abre_el_circuito_hasta_medianoche():
+    """Medido en producción: la app web no devuelve un 429 ni una cabecera —
+    dice en prosa "Hoy no puedo crear más imágenes para ti". Sin `retry_after_s`
+    el breaker caía a su default de 120 s y el gateway reintentaba cada dos
+    minutos, el día entero, un modelo que ya avisó que hasta mañana nada."""
+    from datetime import UTC, datetime
+
+    from src.modules.backends.gemini_web import _require_images
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+
+    class Respuesta:
+        text = "Hoy no puedo crear más imágenes para ti, pero sí puedo buscar imágenes en la web."
+
+    with pytest.raises(CliproxyRetryableError) as exc:
+        _require_images(Respuesta(), [])
+
+    assert exc.value.status_code == 429
+    espera = exc.value.retry_after_s
+    assert espera is not None
+
+    # La espera tiene que terminar en la medianoche UTC de hoy, no antes.
+    ahora = datetime.now(UTC)
+    faltan_hoy = 24 * 3600 - (ahora.hour * 3600 + ahora.minute * 60 + ahora.second)
+    assert abs(espera - faltan_hoy) <= 120
+
+
+def test_otro_texto_sin_imagen_sigue_siendo_un_503_corto():
+    """El desvío es sólo para la cuota. Un rechazo de contenido o prosa suelta
+    puede resolverse al siguiente intento, y sacar el modelo hasta mañana por
+    eso sería tirar el último recurso de la cadena por un fallo puntual."""
+    from src.modules.backends.gemini_web import _require_images
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+
+    class Respuesta:
+        text = "No puedo ayudarte con esa solicitud."
+
+    with pytest.raises(CliproxyRetryableError) as exc:
+        _require_images(Respuesta(), [])
+
+    assert exc.value.status_code == 503
+    assert exc.value.retry_after_s is None
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        # Las dos capturadas contra la instancia real, con horas de diferencia.
+        # El verbo cambia entre respuestas: la primera versión del detector sólo
+        # aceptaba "crear" y dejó pasar la de "generar".
+        "Hoy no puedo crear más imágenes para ti, pero sí puedo buscar imágenes en la web.",
+        "Lo siento, hoy no puedo generar más imágenes para ti, pero si vuelves mañana "
+        "podremos crear más.",
+        "I can't create any more images today.",
+    ],
+)
+def test_se_reconoce_la_cuota_diaria_diga_crear_o_generar(texto: str):
+    from src.modules.backends.gemini_web import _require_images
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+
+    class Respuesta:
+        pass
+
+    respuesta = Respuesta()
+    respuesta.text = texto  # type: ignore[attr-defined]
+
+    with pytest.raises(CliproxyRetryableError) as exc:
+        _require_images(respuesta, [])
+    assert exc.value.status_code == 429
+    assert exc.value.retry_after_s

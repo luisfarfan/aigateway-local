@@ -27,6 +27,7 @@ expone a terceros, hay que revisarlo.
 
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -344,6 +345,42 @@ async def _quiet_close(client: Any) -> None:
         log.warning("gemini_web.close_failed", error=str(exc)[:150])
 
 
+# Cómo dice la app web que se acabó la cuota de imagen del día. No hay status
+# HTTP, ni cabecera, ni un texto fijo: lo dice en prosa, en el idioma de la
+# conversación, y **cambia el verbo entre respuestas**. Las dos capturadas
+# contra la instancia real, con horas de diferencia:
+#
+#   "Hoy no puedo crear más imágenes para ti, pero sí puedo buscar imágenes…"
+#   "Lo siento, hoy no puedo generar más imágenes para ti, pero si vuelves
+#    mañana podremos crear más."
+#
+# Por eso es una regex con el verbo abierto y no una lista de frases: la
+# primera versión sólo aceptaba "crear" y dejó pasar la de "generar" como si
+# fuera un fallo cualquiera, que es volver al reintento cada 2 minutos.
+_QUOTA_DIARIA_AGOTADA = re.compile(
+    r"no\s+pued[oe]\s+\w*\s*(?:crear|generar|hacer|producir)\s+más\s+im[áa]genes"
+    r"|can(?:'t|not)\s+(?:create|generate|make)\s+any\s+more\s+images",
+    re.IGNORECASE,
+)
+
+
+def _seconds_to_utc_midnight() -> int:
+    """Cuánto falta para que se reponga el contador diario.
+
+    Medido en el histórico: el 15-09 generó 63 imágenes entre las 23:45 y las
+    23:59 UTC y el 16-09 arrancó con 60 más a las 00:00:05. El contador se
+    repone a medianoche UTC, así que esa es la espera correcta — no un default
+    de dos minutos.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    ahora = datetime.now(UTC)
+    manana = (ahora + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Un mínimo por si se cruza justo la medianoche: abrir el circuito 0 s lo
+    # dejaría efectivamente cerrado y volveríamos a gastar la llamada.
+    return max(60, int((manana - ahora).total_seconds()))
+
+
 def _require_images(response: Any, uris: list[str]) -> list[str]:
     """Cero imágenes es un FALLO, no un éxito vacío.
 
@@ -352,11 +389,27 @@ def _require_images(response: Any, uris: list[str]) -> list[str]:
     200 con `data: []` deja al cliente sin imagen y sin error que lo explique, y
     la cadena no salta al siguiente candidato. Se levanta reintentable para que
     el routing haga su trabajo.
+
+    **La cuota diaria se distingue del resto.** Cuando el texto dice que hoy no
+    genera más, el error lleva `retry_after_s` hasta medianoche UTC. Sin eso el
+    breaker cae a su default de 120 s y el gateway reintenta cada dos minutos,
+    el día entero, un modelo que ya avisó que hasta mañana nada — el mismo punto
+    ciego que `routing.yaml` documenta para el 429 de la cuota semanal.
     """
     if uris:
         return uris
     texto = (getattr(response, "text", "") or "").strip()
     detalle = f": respondió texto en vez de imagen ({texto[:120]})" if texto else ""
+
+    if _QUOTA_DIARIA_AGOTADA.search(texto):
+        espera = _seconds_to_utc_midnight()
+        log.warning("gemini_web.daily_image_quota_exhausted", retry_after_s=espera)
+        raise CliproxyRetryableError(
+            f"la app web de Gemini agotó su cuota de imágenes del día{detalle}",
+            status_code=429,
+            retry_after_s=espera,
+        )
+
     raise CliproxyRetryableError(
         f"la app web de Gemini no devolvió ninguna imagen{detalle}", status_code=503
     )

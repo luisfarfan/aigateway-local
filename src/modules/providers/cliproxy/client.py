@@ -209,7 +209,14 @@ class CliproxyClient:
         quality: str | None = None,
     ) -> LLMResult:
         request = translate.image_request(model=model, prompt=prompt, size=size, quality=quality)
-        payload = await self._request("POST", request.path, request.body)
+        # El timeout largo, igual que `image_edit`. Generar tarda 20-90 s y por
+        # Gemini la petición sale por `/v1/chat/completions`, así que sin esto
+        # hereda el timeout de chat (120 s) y se corta a mitad de generación —
+        # medido: la cadena saltaba con `upstream_timeout` a un modelo de texto
+        # sin que el de imagen hubiera fallado en nada.
+        payload = await self._request(
+            "POST", request.path, request.body, timeout_s=self._image_timeout
+        )
         return translate.parse_image(payload, model=model)
 
     async def image_edit(
