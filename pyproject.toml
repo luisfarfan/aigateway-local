@@ -99,6 +99,11 @@ tts = [
 # (`ENABLE_BACKEND_GEMINI_WEB=false`).
 geminiweb = [
     "gemini_webapi>=2.1.0",     # AGPL-3.0 — ver nota de arriba
+    # Lee la cookie de sesión del navegador local. Sólo lo usa
+    # `scripts/gemini_web_login.py`, pero va acá y no en `dev` porque sin él el
+    # backend no se puede recuperar cuando la sesión muere — y que falte se
+    # descubre en el peor momento, con la cadena de imagen ya caída.
+    "browser-cookie3>=0.19.1",  # LGPL-3.0
 ]
 
 [tool.hatch.build.targets.wheel]
