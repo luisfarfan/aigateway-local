@@ -75,11 +75,16 @@ async def run_with_fallback[T](
     breaker: CircuitBreaker,
     requested_model: str | None = None,
     candidates: list[str] | None = None,
+    breaker_scopes: tuple[str, ...] = (),
 ) -> RouteResult[T]:
     """Prueba `call(model)` sobre la cadena hasta que uno responda.
 
     `candidates` permite pasar una cadena ya calculada —la de un tier, por
     ejemplo—. Si no se da, se deriva de la tabla como siempre.
+
+    `breaker_scopes` son las capacidades que esta petición necesita: un modelo
+    con esa capacidad apagada se saltea, aunque el modelo en sí esté vivo. Vacío
+    —el default— significa "me basta con que el modelo responda".
     """
     candidates = candidates if candidates is not None else table.candidates(route, requested_model)
     if not candidates:
@@ -91,9 +96,9 @@ async def run_with_fallback[T](
     last_substantive: Exception | None = None
 
     for model in candidates:
-        if await breaker.is_open(model):
+        if await breaker.is_open(model, scopes=breaker_scopes):
             attempts.append(ModelAttempt(model, "skipped_open"))
-            log.info("routing.skipped_open", route=route, model=model)
+            log.info("routing.skipped_open", route=route, model=model, scopes=breaker_scopes)
             continue
 
         started = time.monotonic()
@@ -114,7 +119,15 @@ async def run_with_fallback[T](
             # dentro de la ventana. Sin esto, un modelo con la cuota agotada por
             # dos días se reintenta en cada petición para siempre.
             if (espera := getattr(exc, "retry_after_s", None)) and espera > 0:
-                await breaker.open(model, int(espera), reason=f"upstream pide esperar {espera}s")
+                # `breaker_scope` limita el apagón a una capacidad. Sin él se
+                # apaga el modelo entero, que es lo correcto para un 429 de la
+                # API pero NO para una cuota que sólo mata una capacidad.
+                await breaker.open(
+                    model,
+                    int(espera),
+                    reason=f"upstream pide esperar {espera}s",
+                    scope=getattr(exc, "breaker_scope", None),
+                )
             else:
                 await breaker.record_failure(model)
 

@@ -870,7 +870,7 @@ async def test_streaming_registra_el_modelo_saltado_por_circuito_abierto(monkeyp
         original(self, model=model)
 
     # Circuito abierto para el primer candidato de la cadena chat.
-    async def is_open(self, model):
+    async def is_open(self, model, *, scopes=()):
         return model == "gemini-3-flash"
 
     monkeypatch.setattr(recorder.Observation, "succeeded", espia)
@@ -904,7 +904,7 @@ async def test_no_fallback_no_degrada_ante_circuito_abierto(monkeypatch):
     tocaba."""
     from src.modules.routing.breaker import CircuitBreaker
 
-    async def is_open(self, model):
+    async def is_open(self, model, *, scopes=()):
         return True  # todo cerrado el paso
 
     monkeypatch.setattr(CircuitBreaker, "is_open", is_open)

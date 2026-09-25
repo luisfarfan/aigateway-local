@@ -35,13 +35,32 @@ TABLE = RoutingTable(
 class FakeBreaker:
     """Breaker en memoria. El real usa Redis; la lógica que se prueba es la misma."""
 
-    def __init__(self, abiertos: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        abiertos: set[str] | None = None,
+        por_alcance: dict[str, set[str]] | None = None,
+    ) -> None:
         self.abiertos = abiertos or set()
+        # {alcance: {modelos con esa capacidad apagada}}. Un modelo acá NO está
+        # caído: sólo perdió una capacidad, y sólo se saltea a quien la exija.
+        self.por_alcance = por_alcance or {}
         self.fallos: list[str] = []
         self.aciertos: list[str] = []
+        self.aperturas: list[tuple[str, int, str | None]] = []
 
-    async def is_open(self, model: str) -> bool:
-        return model in self.abiertos
+    async def is_open(self, model: str, *, scopes: tuple[str, ...] = ()) -> bool:
+        if model in self.abiertos:
+            return True
+        return any(model in self.por_alcance.get(s, set()) for s in scopes)
+
+    async def open(
+        self, model: str, seconds: int, *, reason: str, scope: str | None = None
+    ) -> None:
+        self.aperturas.append((model, seconds, scope))
+        if scope:
+            self.por_alcance.setdefault(scope, set()).add(model)
+        else:
+            self.abiertos.add(model)
 
     async def record_failure(self, model: str) -> bool:
         self.fallos.append(model)
@@ -332,3 +351,82 @@ def test_los_backends_reales_cumplen_el_protocolo(factory: str):
     )
     assert isinstance(backend, Backend)
     assert backend.name
+
+
+# ─── Circuito con alcance: apagar una capacidad, no el modelo ────────────────
+
+
+@pytest.mark.asyncio
+async def test_una_capacidad_apagada_no_apaga_el_modelo_entero():
+    """El bug que esto arregla, reportado por un proyecto consumidor:
+
+    la app web de Gemini agota su cuota DIARIA de generación y sigue pudiendo
+    buscar imágenes en internet — de hecho es lo que ofrece cuando ya no genera,
+    y está medido que funciona en ese estado. Con un circuito por modelo, la
+    cuota agotada apagaba también la búsqueda: el gateway dejaba de preguntar
+    exactamente en el estado en que la única respuesta posible seguía viva.
+
+    Quien exige generadas se saltea el modelo; quien acepta las de la web, no.
+    """
+    from src.modules.routing.breaker import SCOPE_GENERATION
+
+    breaker = FakeBreaker(por_alcance={SCOPE_GENERATION: {"modelo-a"}})
+
+    exige = caller({})
+    r1 = await run_with_fallback(
+        exige, route="chat", table=TABLE, breaker=breaker,
+        breaker_scopes=(SCOPE_GENERATION,),
+    )
+    assert r1.model == "modelo-b"
+    assert r1.attempts[0].outcome == "skipped_open"
+
+    acepta = caller({})
+    r2 = await run_with_fallback(acepta, route="chat", table=TABLE, breaker=breaker)
+    assert r2.model == "modelo-a"
+
+
+@pytest.mark.asyncio
+async def test_el_circuito_global_apaga_a_todos_por_igual():
+    """La contraparte: un fallo que sí mata el modelo —cookie muerta, transporte
+    caído— no puede quedar eludible con una cabecera."""
+    from src.modules.routing.breaker import SCOPE_GENERATION
+
+    breaker = FakeBreaker(abiertos={"modelo-a"})
+    for scopes in ((), (SCOPE_GENERATION,)):
+        result = await run_with_fallback(
+            caller({}), route="chat", table=TABLE, breaker=breaker, breaker_scopes=scopes
+        )
+        assert result.model == "modelo-b"
+
+
+@pytest.mark.asyncio
+async def test_un_error_con_alcance_abre_solo_esa_capacidad():
+    """El alcance viaja en la excepción: el backend sabe qué se rompió, el
+    executor sólo lo transporta."""
+    from src.modules.routing.breaker import SCOPE_GENERATION
+
+    breaker = FakeBreaker()
+    exc = CliproxyRetryableError(
+        "cuota diaria", status_code=429, retry_after_s=3600, breaker_scope=SCOPE_GENERATION
+    )
+    await run_with_fallback(
+        caller({"modelo-a": exc}), route="chat", table=TABLE, breaker=breaker
+    )
+
+    assert breaker.aperturas == [("modelo-a", 3600, SCOPE_GENERATION)]
+    # El modelo NO quedó apagado globalmente.
+    assert "modelo-a" not in breaker.abiertos
+    assert breaker.por_alcance[SCOPE_GENERATION] == {"modelo-a"}
+
+
+@pytest.mark.asyncio
+async def test_sin_alcance_declarado_se_apaga_el_modelo_entero():
+    """El default no cambia: un 429 de la API mata al modelo para todo."""
+    breaker = FakeBreaker()
+    exc = CliproxyRetryableError("429", status_code=429, retry_after_s=600)
+    await run_with_fallback(
+        caller({"modelo-a": exc}), route="chat", table=TABLE, breaker=breaker
+    )
+
+    assert breaker.aperturas == [("modelo-a", 600, None)]
+    assert "modelo-a" in breaker.abiertos

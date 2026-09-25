@@ -499,3 +499,33 @@ def test_ante_la_duda_se_etiqueta_como_web():
         alt = ""
 
     assert not _origin_of(AlgoRaro()).is_generated
+
+
+def test_la_cuota_diaria_apaga_la_generacion_y_no_el_modelo():
+    """El apagón tiene que ser de la CAPACIDAD, no del modelo: la app web sigue
+    pudiendo buscar imágenes en internet con la cuota de generación agotada —
+    medido— y apagarla entera dejaba al gateway sin preguntar justo ahí."""
+    from src.modules.backends.gemini_web import _require_images
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+    from src.modules.routing.breaker import SCOPE_GENERATION
+
+    class Respuesta:
+        text = "Hoy no puedo crear más imágenes para ti."
+
+    with pytest.raises(CliproxyRetryableError) as exc:
+        _require_images(Respuesta(), [])
+
+    assert exc.value.breaker_scope == SCOPE_GENERATION
+
+
+def test_un_fallo_cualquiera_no_lleva_alcance():
+    """Sin alcance el circuito se abre global, que es el default correcto."""
+    from src.modules.backends.gemini_web import _require_images
+    from src.modules.providers.cliproxy.errors import CliproxyRetryableError
+
+    class Respuesta:
+        text = "No puedo ayudarte con esa solicitud."
+
+    with pytest.raises(CliproxyRetryableError) as exc:
+        _require_images(Respuesta(), [])
+    assert exc.value.breaker_scope is None

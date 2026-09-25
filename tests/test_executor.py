@@ -251,7 +251,7 @@ async def test_un_429_con_retry_abre_el_circuito_por_ese_tiempo():
     fallos: list[str] = []
 
     class BreakerEspia:
-        async def is_open(self, model):
+        async def is_open(self, model, *, scopes=()):
             return False
 
         async def record_failure(self, model):
@@ -260,7 +260,7 @@ async def test_un_429_con_retry_abre_el_circuito_por_ese_tiempo():
         async def record_success(self, model):
             pass
 
-        async def open(self, model, seconds, *, reason):
+        async def open(self, model, seconds, *, reason, scope=None):
             abiertos.append((model, seconds))
 
     async def call(model):
@@ -289,7 +289,7 @@ async def test_sin_retry_declarado_se_sigue_contando_como_antes():
     fallos: list[str] = []
 
     class BreakerEspia:
-        async def is_open(self, model):
+        async def is_open(self, model, *, scopes=()):
             return False
 
         async def record_failure(self, model):
@@ -298,7 +298,7 @@ async def test_sin_retry_declarado_se_sigue_contando_como_antes():
         async def record_success(self, model):
             pass
 
-        async def open(self, model, seconds, *, reason):
+        async def open(self, model, seconds, *, reason, scope=None):
             abiertos.append((model, seconds))
 
     async def call(model):

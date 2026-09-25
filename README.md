@@ -1007,6 +1007,24 @@ Se eligió opt-in y no "etiquetar y seguir sirviendo" por una razón: etiquetar
 sin cambiar el default sólo arregla al cliente que lee la etiqueta, y el que más
 lo necesita es justamente el que no sabe que existe.
 
+**El circuito se abre por capacidad, no por modelo.** Importa justo acá: cuando
+la cuota diaria de generación se agota, el gateway apaga **la generación** de
+ese modelo —no el modelo— hasta medianoche UTC. Si apagara el modelo entero
+dejaría de preguntar exactamente en el estado en que la búsqueda es lo único que
+responde, que es la situación para la que existe la cabecera.
+
+En la práctica, con la cuota agotada:
+
+```bash
+# sin cabecera → el modelo se saltea, la cadena cae a gpt-image-2
+# con cabecera → el modelo se intenta igual, y devuelve las de la web
+```
+
+En Redis se ve como una clave aparte, `breaker:open:<modelo>#generation`,
+distinta de la global `breaker:open:<modelo>`. `/health` las reporta en
+`open_scopes`: un modelo con `open: false` y una capacidad apagada **no está
+sano**, y decir sólo lo primero escondía media verdad.
+
 #### Pedirlas a propósito
 
 Si tu pipeline las quiere —como candidatas a filtrar, no como entregables—:

@@ -28,10 +28,16 @@ class CliproxyError(GatewayError):
         status_code: int | None = None,
         payload: dict[str, Any] | None = None,
         retry_after_s: int | None = None,
+        breaker_scope: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload or {}
+        # A qué CAPACIDAD del modelo aplica este fallo, si no aplica a todo.
+        # Un modelo puede quedarse sin cuota de generación y seguir sirviendo
+        # para otra cosa; sin esto, el routing lo apaga entero y deja de
+        # preguntar justo donde todavía había respuesta.
+        self.breaker_scope = breaker_scope
         # Cuánto pide esperar el upstream, cuando lo dice. El routing lo usa para
         # abrir el circuito por el tiempo REAL en vez de por un default fijo:
         # reintentar cada 2 minutos algo que el propio Google dice que vuelve en

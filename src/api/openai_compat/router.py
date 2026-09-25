@@ -38,7 +38,7 @@ from src.modules.providers.cliproxy.errors import (
 )
 from src.modules.providers.cliproxy.translate import InputImage, to_openai_chat_completion
 from src.modules.routing import errors as routing_errors
-from src.modules.routing.breaker import CircuitBreaker
+from src.modules.routing.breaker import SCOPE_GENERATION, CircuitBreaker
 from src.modules.routing.config import RoutingTable, load_routing
 from src.modules.routing.executor import NoCandidatesError, RouteResult, run_with_fallback
 from src.modules.routing.tiers import ROUTE_CAPABILITY, load_tiers
@@ -802,6 +802,7 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
     # usar otra herramienta. Un fallback sólo sirve si el sustituto puede hacer
     # el trabajo; degradar imagen a texto es devolver algo que no se pidió.
     genera_imagen = bool(body.model) and body.model in table.image_models()
+    allow_web_img = _allow_web_images(request)
     route = (
         "image"
         if genera_imagen
@@ -883,13 +884,23 @@ async def chat_completions(request: Request, body: ChatCompletionRequest) -> Any
                 resolved = _resolve(registry, model)
                 obs.family = str(await resolved.backend.family_of(resolved.model))
                 obs.meta["backend"] = resolved.backend.name
-                return await resolved.backend.image(prompt, model=resolved.model)
+                result = await resolved.backend.image(prompt, model=resolved.model)
+                # Misma política que `/v1/images/generations`: por esta puerta
+                # se pide una imagen igual, y una foto de un tercero no deja de
+                # serlo porque el endpoint sea el de chat.
+                _exigir_generadas(result, allow_web=allow_web_img)
+                return result
 
             call = attempt_image
 
         try:
             routed = await run_with_fallback(
-                call, route=route, table=table, breaker=breaker, candidates=cands
+                call,
+                route=route,
+                table=table,
+                breaker=breaker,
+                candidates=cands,
+                breaker_scopes=_breaker_scopes(allow_web=allow_web_img) if genera_imagen else (),
             )
         except NoCandidatesError as exc:
             obs.failed(
@@ -988,6 +999,17 @@ ALLOW_WEB_IMAGES_HEADER = "X-Proxima-Allow-Web-Images"
 
 def _allow_web_images(request: Request) -> bool:
     return bool(request.headers.get(ALLOW_WEB_IMAGES_HEADER))
+
+
+def _breaker_scopes(*, allow_web: bool) -> tuple[str, ...]:
+    """Qué capacidad necesita esta petición para que un modelo le sirva.
+
+    Quien exige imágenes generadas se saltea un modelo con la GENERACIÓN
+    apagada, aunque el modelo esté vivo. Quien acepta imágenes de la web no:
+    para él ese modelo sigue siendo un candidato válido — y es justo el estado
+    en que la búsqueda es lo único que responde.
+    """
+    return () if allow_web else (SCOPE_GENERATION,)
 
 
 def _exigir_generadas(result: Any, *, allow_web: bool) -> None:
@@ -1094,7 +1116,12 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
 
         try:
             routed = await run_with_fallback(
-                attempt, route="image", table=table, breaker=breaker, candidates=cands
+                attempt,
+                route="image",
+                table=table,
+                breaker=breaker,
+                candidates=cands,
+                breaker_scopes=_breaker_scopes(allow_web=allow_web),
             )
         except NoCandidatesError as exc:
             obs.failed(
@@ -1203,7 +1230,12 @@ async def images_edits(
 
         try:
             routed = await run_with_fallback(
-                attempt, route="image_edit", table=table, breaker=breaker, candidates=cands
+                attempt,
+                route="image_edit",
+                table=table,
+                breaker=breaker,
+                candidates=cands,
+                breaker_scopes=_breaker_scopes(allow_web=allow_web),
             )
         except NoCandidatesError as exc:
             obs.failed(

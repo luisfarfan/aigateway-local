@@ -48,6 +48,7 @@ from src.modules.providers.cliproxy.translate import (
     LLMResult,
     Message,
 )
+from src.modules.routing.breaker import SCOPE_GENERATION
 
 log = structlog.get_logger(__name__)
 
@@ -424,6 +425,12 @@ def _require_images(response: Any, uris: list[str]) -> list[str]:
             f"la app web de Gemini agotó su cuota de imágenes del día{detalle}",
             status_code=429,
             retry_after_s=espera,
+            # Apaga la GENERACIÓN, no el modelo. La app sigue pudiendo buscar
+            # imágenes en internet —es justo lo que ofrece cuando ya no genera,
+            # y está medido que funciona— así que apagarlo entero dejaba al
+            # gateway sin preguntar en el único estado donde todavía había
+            # respuesta. Quien acepte imágenes de la web sigue pasando.
+            breaker_scope=SCOPE_GENERATION,
         )
 
     raise CliproxyRetryableError(
