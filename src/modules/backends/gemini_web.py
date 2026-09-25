@@ -40,7 +40,10 @@ from src.modules.providers.cliproxy.errors import (
 )
 from src.modules.providers.cliproxy.families import Family
 from src.modules.providers.cliproxy.translate import (
+    ORIGIN_GENERATED,
+    ORIGIN_WEB,
     EmbeddingResult,
+    ImageOrigin,
     InputImage,
     LLMResult,
     Message,
@@ -219,8 +222,12 @@ class GeminiWebBackend:
     ) -> LLMResult:
         """Genera. `size` y `quality` se ignoran: la app web no los acepta."""
         response = await self._generate(prompt)
+        uris, origins = await _as_data_uris(response)
         return LLMResult(
-            text="", model=model, images=_require_images(response, await _as_data_uris(response))
+            text="",
+            model=model,
+            images=_require_images(response, uris),
+            image_origins=origins,
         )
 
     async def image_edit(
@@ -238,8 +245,12 @@ class GeminiWebBackend:
             raise BackendCapabilityError("image_edit necesita al menos una imagen de entrada")
         async with _as_temp_files(images) as paths:
             response = await self._generate(prompt, files=paths)
+        uris, origins = await _as_data_uris(response)
         return LLMResult(
-            text="", model=model, images=_require_images(response, await _as_data_uris(response))
+            text="",
+            model=model,
+            images=_require_images(response, uris),
+            image_origins=origins,
         )
 
     async def embed(self, texts: list[str], *, model: str = MODEL_ID) -> EmbeddingResult:
@@ -390,6 +401,11 @@ def _require_images(response: Any, uris: list[str]) -> list[str]:
     la cadena no salta al siguiente candidato. Se levanta reintentable para que
     el routing haga su trabajo.
 
+    **Acá "imagen" incluye las de la web.** Que una respuesta de sólo imágenes
+    web valga o no como éxito es una decisión de POLÍTICA, y vive en el router,
+    que es donde se ve si el cliente las pidió (ver
+    `_exigir_generadas`). El backend informa lo que pasó; no decide por nadie.
+
     **La cuota diaria se distingue del resto.** Cuando el texto dice que hoy no
     genera más, el error lleva `retry_after_s` hasta medianoche UTC. Sin eso el
     breaker cae a su default de 120 s y el gateway reintenta cada dos minutos,
@@ -436,8 +452,48 @@ async def _as_temp_files(images: list[InputImage]):
         yield paths
 
 
-async def _as_data_uris(response: Any) -> list[str]:
-    """Materializa las imágenes generadas como data URIs.
+def _origin_of(img: Any) -> ImageOrigin:
+    """Distingue una imagen GENERADA de una que Gemini encontró en la web.
+
+    `response.images` mezcla las dos clases de `gemini_webapi` y hasta ahora el
+    gateway las aplanaba a bytes, perdiendo la única diferencia que importa.
+    Medido: con la cuota diaria agotada, pedir "fotos reales de la torre
+    Eiffel" devolvió 4 archivos, HTTP 200 y `outcome=ok` — fotografías de banco
+    de imágenes servidas como si el modelo las hubiera creado.
+
+    El discriminante es el TIPO, no una heurística sobre el texto: la librería
+    tiene `GeneratedImage` y `WebImage`, y sólo la primera trae `image_id`.
+    Si la librería cambia y el tipo no se puede importar, se cae del lado
+    prudente —`web`— porque equivocarse hacia "generada" es lo que publica una
+    foto ajena.
+    """
+    try:
+        from gemini_webapi.types import GeneratedImage
+    except ImportError:  # pragma: no cover — versión inesperada de la librería
+        log.warning("gemini_web.generated_image_type_missing")
+        return ImageOrigin(origin=ORIGIN_WEB, source_url=getattr(img, "url", None))
+
+    if isinstance(img, GeneratedImage):
+        # La `url` de una generada apunta al almacenamiento interno de Google y
+        # exige la sesión: no identifica ninguna procedencia, así que no se
+        # guarda. El título sí, que es como la app etiqueta al generador.
+        return ImageOrigin(origin=ORIGIN_GENERATED, title=getattr(img, "title", None) or None)
+
+    return ImageOrigin(
+        origin=ORIGIN_WEB,
+        source_url=getattr(img, "url", None) or None,
+        title=getattr(img, "title", None) or None,
+        alt=getattr(img, "alt", None) or None,
+    )
+
+
+async def _as_data_uris(response: Any) -> tuple[list[str], list[ImageOrigin]]:
+    """Materializa las imágenes como data URIs, con su procedencia.
+
+    Devuelve las dos listas ALINEADAS por índice. Van juntas y no en dos
+    recorridos porque una descarga puede fallar y saltarse un elemento: si las
+    procedencias se calcularan aparte, quedarían corridas y cada imagen llevaría
+    la etiqueta de otra, que es peor que no tener etiqueta.
 
     Se usa el `save()` de la librería y no una descarga propia: la URL de Google
     exige la sesión autenticada, que vive dentro del objeto. Bajarla con un
@@ -453,9 +509,10 @@ async def _as_data_uris(response: Any) -> list[str]:
 
     images = response.images or []
     if not images:
-        return []
+        return [], []
 
     out: list[str] = []
+    origins: list[ImageOrigin] = []
     with tempfile.TemporaryDirectory(prefix="proxima-geminiweb-out-") as tmp:
         for index, img in enumerate(images):
             try:
@@ -470,7 +527,18 @@ async def _as_data_uris(response: Any) -> list[str]:
             data = Path(saved).read_bytes()
             if data:
                 out.append(f"data:{_mime_of(data)};base64,{base64.b64encode(data).decode()}")
-    return out
+                origins.append(_origin_of(img))
+
+    generadas = sum(1 for o in origins if o.is_generated)
+    if generadas != len(origins):
+        # Visible en el log aunque nadie mire el campo nuevo: una respuesta con
+        # imágenes de la web es un evento que alguien tiene que poder auditar.
+        log.info(
+            "gemini_web.images_resolved",
+            generadas=generadas,
+            de_la_web=len(origins) - generadas,
+        )
+    return out, origins
 
 
 def _mime_of(data: bytes) -> str:

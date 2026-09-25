@@ -348,7 +348,7 @@ async def test_imagen_default_es_b64_json():
     response = await call(
         build_app(fake), "POST", "/v1/images/generations", json={"prompt": "un cubo"}
     )
-    assert response.json()["data"][0] == {"b64_json": "AAA"}
+    assert response.json()["data"][0] == {"b64_json": "AAA", "proxima_origin": "generated"}
 
 
 @pytest.mark.asyncio
@@ -373,7 +373,7 @@ async def test_edicion_recibe_la_foto_y_no_va_a_generacion():
     assert response.status_code == 200
     assert fake.calls == ["image_edit"]
     assert [img.content for img in fake.input_images] == [b"\x89PNG-falso"]
-    assert response.json()["data"][0] == {"b64_json": "BBB"}
+    assert response.json()["data"][0] == {"b64_json": "BBB", "proxima_origin": "generated"}
 
 
 @pytest.mark.asyncio
@@ -1041,7 +1041,7 @@ async def test_imagen_respeta_response_format_b64_json():
         json={"prompt": "x", "response_format": "b64_json"},
     )
     item = b64.json()["data"][0]
-    assert item == {"b64_json": "QUJD"}  # pelado, sin cabecera data:
+    assert item == {"b64_json": "QUJD", "proxima_origin": "generated"}  # pelado, sin data:
 
     url = await call(
         build_app(fake),
@@ -1049,7 +1049,10 @@ async def test_imagen_respeta_response_format_b64_json():
         "/v1/images/generations",
         json={"prompt": "x", "response_format": "url"},
     )
-    assert url.json()["data"][0] == {"url": "data:image/png;base64,QUJD"}
+    assert url.json()["data"][0] == {
+        "url": "data:image/png;base64,QUJD",
+        "proxima_origin": "generated",
+    }
 
 
 # ─── Descubrimiento ───────────────────────────────────────────────────────────
@@ -1286,3 +1289,122 @@ async def test_pedir_imagen_en_streaming_es_400_y_no_una_degradacion():
     assert response.json()["error"]["type"] == "invalid_request"
     # Y sobre todo: no se llamó a NINGÚN modelo.
     assert fake.calls == []
+
+
+# ─── Procedencia de las imágenes: generada vs. encontrada en la web ──────────
+
+
+def _resultado_web(n: int = 2) -> LLMResult:
+    """Lo que devuelve la app web de Gemini cuando agotó su cuota de generación
+    y decide buscar en internet: archivos de imagen reales, de terceros."""
+    from src.modules.providers.cliproxy.translate import ORIGIN_WEB, ImageOrigin
+
+    return LLMResult(
+        text="",
+        model="nano-banana-web",
+        images=[f"data:image/jpeg;base64,AAA{i}" for i in range(n)],
+        image_origins=[
+            ImageOrigin(
+                origin=ORIGIN_WEB,
+                source_url=f"https://ejemplo{i}.com/foto.jpg",
+                title=f"Foto {i}",
+                alt="una foto",
+            )
+            for i in range(n)
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_solo_imagenes_de_la_web_no_cuenta_como_generacion():
+    """Medido contra la instancia real: con la cuota diaria agotada, pedir
+    "fotos reales de la torre Eiffel" devolvía 4 archivos y HTTP 200 — fotos de
+    banco de imágenes servidas como si el modelo las hubiera creado.
+
+    Ahora la ruta de imagen falla, y falla REINTENTABLE para que la cadena
+    pruebe el siguiente candidato en vez de entregar algo que no se pidió."""
+    fake = FakeCliproxyClient(_resultado_web())
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/generations",
+        json={"model": "geminiweb/nano-banana-web", "prompt": "un gato"},
+    )
+
+    assert response.status_code >= 400
+    mensaje = response.json()["error"]["message"]
+    assert "no generó ninguna imagen" in mensaje
+    # El mensaje tiene que decir cómo pedirlas igual, o el cliente queda a ciegas.
+    assert "X-Proxima-Allow-Web-Images" in mensaje
+    # Y de dónde salieron, para poder auditarlo.
+    assert "ejemplo0.com" in mensaje
+
+
+@pytest.mark.asyncio
+async def test_con_la_cabecera_explicita_las_de_la_web_si_llegan_con_procedencia():
+    """El pedido del proyecto que consume el gateway: esas imágenes le sirven,
+    pero necesita saber cuáles son y de qué URL salieron para poder filtrarlas.
+    Antes llegaban idénticas a las generadas y era imposible distinguirlas."""
+    fake = FakeCliproxyClient(_resultado_web())
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/generations",
+        json={"model": "geminiweb/nano-banana-web", "prompt": "un gato"},
+        headers={"X-Proxima-Allow-Web-Images": "1"},
+    )
+
+    assert response.status_code == 200
+    item = response.json()["data"][0]
+    assert item["proxima_origin"] == "web"
+    assert item["proxima_source_url"] == "https://ejemplo0.com/foto.jpg"
+    assert item["proxima_title"] == "Foto 0"
+    assert item["b64_json"] == "AAA0"
+
+
+@pytest.mark.asyncio
+async def test_una_generada_entre_las_de_la_web_alcanza_para_ser_exito():
+    """El corte es "¿generó algo?", no "¿vino algo de la web?". Una respuesta
+    mixta es una generación válida que además trajo referencias."""
+    from src.modules.providers.cliproxy.translate import ORIGIN_WEB, ImageOrigin
+
+    fake = FakeCliproxyClient(
+        LLMResult(
+            text="",
+            model="nano-banana-web",
+            images=["data:image/png;base64,GEN", "data:image/jpeg;base64,WEB"],
+            image_origins=[
+                ImageOrigin(),
+                ImageOrigin(origin=ORIGIN_WEB, source_url="https://ejemplo.com/x.jpg"),
+            ],
+        )
+    )
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/generations",
+        json={"model": "geminiweb/nano-banana-web", "prompt": "un gato"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data[0]["proxima_origin"] == "generated"
+    assert data[1]["proxima_origin"] == "web"
+    # La generada no inventa procedencia: su url interna no identifica nada.
+    assert "proxima_source_url" not in data[0]
+
+
+@pytest.mark.asyncio
+async def test_la_edicion_tiene_la_misma_politica_que_la_generacion():
+    """`image_edit` es la ruta del catálogo de producto — justo donde una foto
+    ajena hace más daño. No puede ser más laxa que la de generación."""
+    fake = FakeCliproxyClient(_resultado_web(1))
+    response = await call(
+        build_app(fake),
+        "POST",
+        "/v1/images/edits",
+        data={"prompt": "quitá el fondo", "model": "geminiweb/nano-banana-web"},
+        files={"image": ("foto.png", b"\x89PNG\r\n\x1a\nx", "image/png")},
+    )
+    assert response.status_code >= 400
+    assert "no generó ninguna imagen" in response.json()["error"]["message"]

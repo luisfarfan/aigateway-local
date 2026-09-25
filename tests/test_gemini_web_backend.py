@@ -461,3 +461,41 @@ def test_se_reconoce_la_cuota_diaria_diga_crear_o_generar(texto: str):
         _require_images(respuesta, [])
     assert exc.value.status_code == 429
     assert exc.value.retry_after_s
+
+
+# ─── Distinción generada / encontrada en la web ───────────────────────────────
+
+
+def test_una_imagen_generada_y_una_de_la_web_no_se_etiquetan_igual():
+    """El discriminante es el TIPO de la librería, no una heurística. Antes
+    `_as_data_uris` aplanaba las dos clases a bytes y la diferencia moría ahí:
+    medido, 4 fotos de banco de imágenes salieron como generación exitosa."""
+    from gemini_webapi.types import GeneratedImage, WebImage
+
+    from src.modules.backends.gemini_web import _origin_of
+
+    generada = GeneratedImage(url="https://lh3.googleusercontent.com/x", title="Imagen", alt="")
+    web = WebImage(url="https://ejemplo.com/foto.jpg", title="Torre Eiffel", alt="una foto")
+
+    assert _origin_of(generada).is_generated
+    # La url interna de una generada no identifica procedencia: no se guarda.
+    assert _origin_of(generada).source_url is None
+
+    o = _origin_of(web)
+    assert not o.is_generated
+    assert o.source_url == "https://ejemplo.com/foto.jpg"
+    assert o.title == "Torre Eiffel"
+    assert o.alt == "una foto"
+
+
+def test_ante_la_duda_se_etiqueta_como_web():
+    """Equivocarse hacia "generada" publica una foto ajena; equivocarse hacia
+    "web" sólo pierde una imagen. El default va del lado que no hace daño."""
+    from src.modules.backends.gemini_web import _origin_of
+
+    class AlgoRaro:
+        url = "https://ejemplo.com/x.jpg"
+        title = "?"
+        alt = ""
+
+    assert not _origin_of(AlgoRaro()).is_generated

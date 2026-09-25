@@ -34,6 +34,7 @@ from src.modules.observability import project as project_header
 from src.modules.observability.recorder import AttemptRecord, Observation, observe
 from src.modules.providers.cliproxy.errors import (
     CliproxyError,
+    CliproxyRetryableError,
 )
 from src.modules.providers.cliproxy.translate import InputImage, to_openai_chat_completion
 from src.modules.routing import errors as routing_errors
@@ -973,17 +974,90 @@ def _last_user_text(messages: list[dict[str, Any]]) -> str:
     return str((messages or [{}])[-1].get("content") or "").strip()
 
 
-def _image_item(data_uri: str, response_format: str) -> dict[str, str]:
+# Cabecera con la que un cliente acepta recibir imágenes que NO generó el
+# modelo, sino que la app web de Gemini encontró buscando en internet.
+#
+# Es opt-in y no un default por una razón concreta: sin ella, una respuesta de
+# sólo imágenes web valía 200 y la cadena no saltaba a `gpt-image-2`, así que
+# quien no supiera del asunto publicaba fotos de terceros creyéndolas propias.
+# Etiquetarlas sin cambiar el default habría arreglado sólo al cliente que lee
+# la etiqueta — y el que más lo necesita es justamente el que no sabe que
+# existe. Con esto, lo seguro es lo que pasa si no hacés nada.
+ALLOW_WEB_IMAGES_HEADER = "X-Proxima-Allow-Web-Images"
+
+
+def _allow_web_images(request: Request) -> bool:
+    return bool(request.headers.get(ALLOW_WEB_IMAGES_HEADER))
+
+
+def _exigir_generadas(result: Any, *, allow_web: bool) -> None:
+    """Falla si la ruta de imagen no trajo ni una imagen GENERADA.
+
+    Vive en el router y no en el backend porque es política, y la política
+    necesita ver la petición: el backend informa qué llegó, acá se decide si
+    eso cumple lo que el cliente pidió.
+
+    Se levanta reintentable a propósito: así `run_with_fallback` lo trata como
+    un fallo del candidato y prueba el siguiente de la cadena — que es el
+    comportamiento correcto cuando la app web de Gemini contesta con fotos de
+    la web porque agotó su cuota de generación.
+    """
+    if allow_web or not result.images:
+        # Sin imágenes no hay nada que juzgar: `_require_images` en el backend
+        # ya levantó, o el backend no produce imágenes de la web en absoluto.
+        return
+    if result.generated_images:
+        return
+
+    origenes = result.web_images
+    dominios = ", ".join(sorted({_host_of(o.source_url) for _, o in origenes if o.source_url}))
+    raise CliproxyRetryableError(
+        f"el modelo no generó ninguna imagen: devolvió {len(origenes)} de una búsqueda "
+        f"web{f' ({dominios})' if dominios else ''}, que son fotografías de terceros y no "
+        f"obra del modelo. Para recibirlas igualmente, mandá la cabecera "
+        f"{ALLOW_WEB_IMAGES_HEADER}: 1",
+        status_code=503,
+    )
+
+
+def _host_of(url: str | None) -> str:
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(url or "").netloc or "?"
+    except ValueError:
+        return "?"
+
+
+def _image_item(data_uri: str, response_format: str, origin: Any = None) -> dict[str, Any]:
     """Un item de imagen en la forma que pidió el cliente.
 
     Internamente la imagen viaja como data-URI (`data:image/png;base64,XXXX`).
     Para `b64_json` se devuelve el base64 pelado —sin la cabecera `data:...,`—,
     que es lo que espera el contrato de OpenAI; para `url`, el data-URI entero.
+
+    La procedencia va en claves `proxima_*`, fuera del contrato de OpenAI: un
+    cliente que sólo habla OpenAI las ignora, y el que las conoce puede separar
+    lo generado de lo encontrado sin adivinar. Antes las dos cosas salían
+    idénticas y era imposible tratarlas distinto.
     """
-    if response_format == "url":
-        return {"url": data_uri}
+    item: dict[str, Any] = (
+        {"url": data_uri} if response_format == "url" else {"b64_json": _b64_of(data_uri)}
+    )
+    if origin is not None:
+        item["proxima_origin"] = origin.origin
+        if not origin.is_generated:
+            # Sólo en las de la web, y es lo que permite auditar de dónde salió
+            # y filtrarla por dominio o por tamaño antes de publicarla.
+            item["proxima_source_url"] = origin.source_url
+            item["proxima_title"] = origin.title
+            item["proxima_alt"] = origin.alt
+    return item
+
+
+def _b64_of(data_uri: str) -> str:
     _, _, b64 = data_uri.partition(",")
-    return {"b64_json": b64 or data_uri}
+    return b64 or data_uri
 
 
 @router.post("/v1/images/generations", summary="Generación de imagen")
@@ -1006,13 +1080,17 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
 
     async with observe(obs):
 
+        allow_web = _allow_web_images(request)
+
         async def attempt(model: str) -> Any:
             resolved = _resolve(registry, model)
             obs.family = str(await resolved.backend.family_of(resolved.model))
             obs.meta["backend"] = resolved.backend.name
-            return await resolved.backend.image(
+            result = await resolved.backend.image(
                 body.prompt, model=resolved.model, size=body.size, quality=body.quality
             )
+            _exigir_generadas(result, allow_web=allow_web)
+            return result
 
         try:
             routed = await run_with_fallback(
@@ -1050,7 +1128,10 @@ async def images_generations(request: Request, body: ImageRequest) -> Any:
         return {
             "created": 0,
             "model": result.model,
-            "data": [_image_item(url, body.response_format) for url in result.images],
+            "data": [
+                _image_item(url, body.response_format, result.origin_at(i))
+                for i, url in enumerate(result.images)
+            ],
             "usage": {
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,
@@ -1106,15 +1187,19 @@ async def images_edits(
         client_id=_client_id_of(request),
     )
 
+    allow_web = _allow_web_images(request)
+
     async with observe(obs):
 
         async def attempt(candidate: str) -> Any:
             resolved = _resolve(registry, candidate)
             obs.family = str(await resolved.backend.family_of(resolved.model))
             obs.meta["backend"] = resolved.backend.name
-            return await resolved.backend.image_edit(
+            result = await resolved.backend.image_edit(
                 prompt, images=inputs, model=resolved.model, size=size, quality=quality
             )
+            _exigir_generadas(result, allow_web=allow_web)
+            return result
 
         try:
             routed = await run_with_fallback(
@@ -1147,7 +1232,10 @@ async def images_edits(
         return {
             "created": 0,
             "model": result.model,
-            "data": [_image_item(url, response_format) for url in result.images],
+            "data": [
+                _image_item(url, response_format, result.origin_at(i))
+                for i, url in enumerate(result.images)
+            ],
             "usage": {
                 "prompt_tokens": result.prompt_tokens,
                 "completion_tokens": result.completion_tokens,

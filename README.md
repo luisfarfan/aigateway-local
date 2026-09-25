@@ -1111,6 +1111,33 @@ python scripts/gemini_web_login.py           # extrae del navegador y valida
 python scripts/gemini_web_login.py --check   # sólo comprobar la actual
 ```
 
+**Ojo: puede devolver imágenes que NO generó.** Cuando agota su cuota diaria,
+la app web ofrece buscar en internet, y esas fotos llegaban mezcladas con las
+generadas y sin forma de distinguirlas — medido: pedir "fotos reales de la torre
+Eiffel" devolvió 4 archivos de Wikimedia, Alamy y un blog, con HTTP 200. Son
+fotografías de terceros: publicarlas en una ficha de producto es un problema de
+licencia, no sólo de calidad.
+
+Desde entonces cada imagen viaja con su procedencia, y una respuesta **sin
+ninguna imagen generada** es un fallo: la cadena salta al siguiente candidato en
+vez de entregar algo que no se pidió. Para recibirlas igualmente hay que pedirlo:
+
+```bash
+curl ... -H 'X-Proxima-Allow-Web-Images: 1'
+```
+
+Y entonces cada item de `data[]` trae de dónde salió:
+
+```json
+{ "b64_json": "...",
+  "proxima_origin": "web",
+  "proxima_source_url": "https://upload.wikimedia.org/.../Eiffel_Tower_Paris_01.JPG",
+  "proxima_alt": "real photos Eiffel Tower Paris France" }
+```
+
+Las generadas traen `"proxima_origin": "generated"` y ninguna URL: la que tienen
+apunta al almacenamiento interno de Google y no identifica procedencia alguna.
+
 **Mejor que esperar el aviso: renovarla sola.** Hay un timer que corre eso una
 vez al día y reinicia el gateway sólo si la cookie cambió — ver
 [Servicio nativo](#servicio-nativo-que-funcione-siempre):

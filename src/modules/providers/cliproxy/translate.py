@@ -45,6 +45,36 @@ class Source:
     title: str
 
 
+# Cómo llegó una imagen a la respuesta. La distinción no es cosmética: una
+# imagen GENERADA es obra del modelo y se puede publicar; una de la WEB es una
+# fotografía de un tercero, con dueño y sin licencia, que la app web de Gemini
+# ofrece como sustituto cuando no puede generar ("hoy no puedo crear más
+# imágenes, pero sí puedo buscar imágenes en la web"). Servir la segunda como
+# si fuera la primera es publicar una foto ajena creyendo que es propia.
+ORIGIN_GENERATED = "generated"
+ORIGIN_WEB = "web"
+
+
+@dataclass(frozen=True)
+class ImageOrigin:
+    """Procedencia de UNA imagen, alineada por índice con `LLMResult.images`.
+
+    `source_url` sólo tiene sentido en las de la web, y es lo que permite
+    auditar de dónde salió y filtrarla por dominio o por tamaño antes de
+    usarla. En las generadas la URL apunta al almacenamiento interno del
+    proveedor y no identifica ninguna procedencia, así que se deja vacía.
+    """
+
+    origin: str = ORIGIN_GENERATED
+    source_url: str | None = None
+    title: str | None = None
+    alt: str | None = None
+
+    @property
+    def is_generated(self) -> bool:
+        return self.origin == ORIGIN_GENERATED
+
+
 @dataclass
 class LLMResult:
     """Resultado normalizado, venga de la superficie que venga.
@@ -60,6 +90,11 @@ class LLMResult:
     completion_tokens: int = 0
     sources: list[Source] = field(default_factory=list)
     images: list[str] = field(default_factory=list)
+    # Procedencia de cada imagen, por índice. VACÍA significa "todas generadas":
+    # es el caso de todo backend que sólo sabe generar, que son todos menos la
+    # app web de Gemini. Así ninguno tiene que rellenar un campo para decir lo
+    # único que puede decir.
+    image_origins: list[ImageOrigin] = field(default_factory=list)
     searched: bool = False
     # Function calling. Un agente decide su siguiente paso con esto: perderlo
     # deja al cliente con un mensaje vacío y un bucle que no avanza.
@@ -68,6 +103,26 @@ class LLMResult:
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    def origin_at(self, index: int) -> ImageOrigin:
+        """La procedencia de la imagen `index`, con el default explícito."""
+        if index < len(self.image_origins):
+            return self.image_origins[index]
+        return ImageOrigin()
+
+    @property
+    def generated_images(self) -> list[str]:
+        """Sólo las que creó el modelo. Lo que una ruta de imagen promete."""
+        return [uri for i, uri in enumerate(self.images) if self.origin_at(i).is_generated]
+
+    @property
+    def web_images(self) -> list[tuple[str, ImageOrigin]]:
+        """Las que salieron de una búsqueda, con su procedencia."""
+        return [
+            (uri, self.origin_at(i))
+            for i, uri in enumerate(self.images)
+            if not self.origin_at(i).is_generated
+        ]
 
 
 @dataclass(frozen=True)

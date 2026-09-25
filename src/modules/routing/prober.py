@@ -208,7 +208,14 @@ async def probe_model(
     if "image" in include_expensive:
         # No basta con que la llamada no lance: un modelo de sólo-chat responde
         # texto sin imagen y pasaría como generador (el mismo falso positivo que
-        # la visión). Se exige que VUELVAN bytes de imagen.
+        # la visión). Se exige que vuelvan bytes de imagen GENERADA.
+        #
+        # Lo de "generada" no es un matiz. Antes esto miraba `r.images`, que en
+        # la app web de Gemini mezcla lo que creó el modelo con lo que encontró
+        # buscando en internet: sondear con la cuota agotada habría marcado
+        # `image: true` por unas fotos de banco de imágenes, grabando la mentira
+        # en el mapa y propagándola a los tiers. `generated_images` sólo cuenta
+        # lo que el modelo sabe hacer, que es lo que la tarjeta declara.
         #
         # Y se distingue "no generó" de "no se pudo probar": la generación es
         # lenta y se rate-limitea (429/cooldown). Un cooldown NO significa que el
@@ -218,9 +225,15 @@ async def probe_model(
         started_image = time.monotonic()
         try:
             r = await backend.image("un cuadrado rojo simple", model=model)
-            card.capabilities["image"] = bool(r.images)
-            if r.images:
+            generadas = getattr(r, "generated_images", None)
+            generadas = r.images if generadas is None else generadas
+            card.capabilities["image"] = bool(generadas)
+            if generadas:
                 card.image_latency_s = round(time.monotonic() - started_image, 2)
+            elif r.images:
+                card.errors["image"] = (
+                    f"no generó: devolvió {len(r.images)} imagen(es) de una búsqueda web"
+                )
             else:
                 card.errors["image"] = "respondió sin imagen"
         except BackendCapabilityError:
