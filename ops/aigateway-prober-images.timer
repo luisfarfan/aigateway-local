@@ -1,0 +1,18 @@
+# Semanal, y de madrugada UTC. Dos razones, las dos medidas:
+#
+#   * La cuota diaria de imagen de la app web de Gemini se repone a medianoche
+#     UTC. Sondear con ella agotada marca `image: false` un modelo que sí sabe
+#     generar, y esa mentira se propaga a los tiers.
+#   * `--images` genera una imagen por modelo sobre ~39 modelos, gastando cuota
+#     de las suscripciones que sirven al tráfico. Diario sería insostenible;
+#     semanal alcanza, porque qué modelos generan imágenes cambia poco.
+[Unit]
+Description=Proxima Gateway — prober con imagen, semanal tras el reset de cuota
+
+[Timer]
+OnCalendar=Sat *-*-* 00:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

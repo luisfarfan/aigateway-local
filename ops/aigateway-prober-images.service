@@ -1,0 +1,13 @@
+# Barrido de capacidades CON sondeo de imagen. Lo dispara
+# aigateway-prober-images.timer. Ver ops/probe-models-images.sh.
+[Unit]
+Description=Proxima Gateway — prober con sondeo de imagen (caro)
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=%h/projects/aigateway-local/ops/probe-models-images.sh
+# Una generación tarda 20-150 s y son ~39 modelos. El barrido barato se corta a
+# los 1200 s; éste necesita mucho más o se mata a sí mismo a media lista.
+TimeoutStartSec=5400

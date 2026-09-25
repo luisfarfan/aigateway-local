@@ -2223,9 +2223,11 @@ backend `geminiweb/`— el que renueva su cookie:
 mkdir -p ~/.config/systemd/user
 cp ops/aigateway.service ops/aigateway-worker.service \
    ops/aigateway-prober.service ops/aigateway-prober.timer \
+   ops/aigateway-prober-images.service ops/aigateway-prober-images.timer \
    ops/gemini-web-refresh.service ops/gemini-web-refresh.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now aigateway aigateway-worker aigateway-prober.timer
+systemctl --user enable --now aigateway aigateway-worker aigateway-prober.timer \
+  aigateway-prober-images.timer
 
 # Sólo si usás el backend geminiweb/ (ver "La app web de Gemini").
 systemctl --user enable --now gemini-web-refresh.timer
@@ -2240,6 +2242,7 @@ sudo loginctl enable-linger $USER
 | `aigateway-worker` | ejecuta la cola de jobs (`/api/v1/jobs`) |
 | `aigateway-prober.timer` | regenera el [mapa de capacidades](#mapa-de-capacidades-prober) cada 6 h |
 | `gemini-web-refresh.timer` | renueva a diario la cookie de [la app web de Gemini](#la-app-web-de-gemini) desde el navegador |
+| `aigateway-prober-images.timer` | sondea la capacidad de IMAGEN, semanal tras el reset de cuota UTC |
 
 Comprobar y operar:
 
