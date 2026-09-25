@@ -1,0 +1,16 @@
+# Renueva la cookie de la app web de Gemini desde el navegador local.
+# Lo dispara gemini-web-refresh.timer. Ver ops/gemini-web-refresh.sh.
+[Unit]
+Description=Proxima Gateway — refrescar la sesión de la app web de Gemini
+# Necesita el llavero desbloqueado para leer las cookies de Chrome, y eso sólo
+# existe con una sesión gráfica iniciada. Sin esto, una corrida tras el arranque
+# y antes del login fallaría con "no encontré nada" en vez de refrescar.
+After=graphical-session.target network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=%h/projects/aigateway-local/ops/gemini-web-refresh.sh
+# Validar la cookie es una llamada de red a Google; el reinicio del gateway que
+# puede venir después tampoco es instantáneo.
+TimeoutStartSec=300

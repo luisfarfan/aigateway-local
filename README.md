@@ -1096,6 +1096,37 @@ python scripts/gemini_web_login.py           # extrae del navegador y valida
 python scripts/gemini_web_login.py --check   # sólo comprobar la actual
 ```
 
+**Mejor que esperar el aviso: renovarla sola.** Hay un timer que corre eso una
+vez al día y reinicia el gateway sólo si la cookie cambió — ver
+[Servicio nativo](#servicio-nativo-que-funcione-siempre):
+
+```bash
+systemctl --user enable --now gemini-web-refresh.timer
+```
+
+Ataca el modo de fallo real, que no es que Google te eche: es que **la copia del
+gateway se queda quieta**. La librería rota `__Secure-1PSIDTS` sola, pero sólo
+mientras hay tráfico, y este backend es el último recurso de la cadena de
+imagen — puede pasar días sin una sola petición. Mientras tanto, en Chrome la
+misma sesión sigue sana porque vos sí usás `gemini.google.com`. El timer copia
+la sana sobre la podrida antes de que la diferencia importe.
+
+**Una vez al día, y ni una más.** Cada corrida abre una sesión autenticada nueva
+contra Google al validar; acumularlas invalida la cuenta (el detalle, medido,
+está en `gemini_web.py::check_session`). No subas la frecuencia sin leer eso.
+
+Dos cosas pueden dejar el timer sin efecto, y ninguna da error claro:
+
+- **Necesita sesión gráfica iniciada.** El llavero tiene que estar desbloqueado
+  para descifrar el store de Chrome. La unidad cuelga de `graphical-session.target`,
+  pero si tenés `loginctl enable-linger` y la máquina arranca sin que entres,
+  el timer dispara contra un llavero cerrado y no encuentra nada.
+- **Lee el disco, no la memoria de Chrome** (ver el aviso de abajo). Con Chrome
+  abierto obtiene la última copia volcada, no la del momento. Para el timer
+  alcanza — de horas a días de diferencia, contra la semana que tarda en
+  pudrirse—, pero explica que la cookie que escribe no sea idéntica a la del
+  navegador en ese instante.
+
 **Ojo con el perfil del navegador.** Chrome guarda un almacén de cookies por
 perfil (`Default`, `Profile 1`, `Profile 2`…), y `browser-cookie3` lee `Default`
 salvo que se le diga otra cosa. Si iniciaste sesión en otro perfil, la
@@ -2143,14 +2174,19 @@ a mano en un terminal, mueren al cerrarlo. Resultado: reinicias y todo vuelve **
 la puerta de entrada**.
 
 Se arregla con servicios de usuario de systemd — con tu cuenta, tu venv y tu `.env`,
-sin root. Son tres: la API, el worker de jobs, y el timer del prober:
+sin root. Son cuatro: la API, el worker de jobs, el timer del prober, y —si usás el
+backend `geminiweb/`— el que renueva su cookie:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp ops/aigateway.service ops/aigateway-worker.service \
-   ops/aigateway-prober.service ops/aigateway-prober.timer ~/.config/systemd/user/
+   ops/aigateway-prober.service ops/aigateway-prober.timer \
+   ops/gemini-web-refresh.service ops/gemini-web-refresh.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now aigateway aigateway-worker aigateway-prober.timer
+
+# Sólo si usás el backend geminiweb/ (ver "La app web de Gemini").
+systemctl --user enable --now gemini-web-refresh.timer
 
 # Sin esto systemd los mata al cerrar sesión, y no arrancan hasta que entres.
 sudo loginctl enable-linger $USER
@@ -2161,6 +2197,7 @@ sudo loginctl enable-linger $USER
 | `aigateway` | la API en `0.0.0.0:8000` |
 | `aigateway-worker` | ejecuta la cola de jobs (`/api/v1/jobs`) |
 | `aigateway-prober.timer` | regenera el [mapa de capacidades](#mapa-de-capacidades-prober) cada 6 h |
+| `gemini-web-refresh.timer` | renueva a diario la cookie de [la app web de Gemini](#la-app-web-de-gemini) desde el navegador |
 
 Comprobar y operar:
 

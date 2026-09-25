@@ -1,0 +1,19 @@
+# Una vez al día, y ni una más: cada corrida abre una sesión nueva contra Google
+# y acumularlas invalida la cuenta (ver la cabecera del .sh). Un día es de sobra
+# — la cookie tardó una semana en pudrirse.
+[Unit]
+Description=Proxima Gateway — refresco diario de la sesión de Gemini web
+
+[Timer]
+# 20 min tras el arranque: da tiempo a que la sesión gráfica esté lista y el
+# llavero desbloqueado. Antes de eso, leer las cookies de Chrome falla.
+OnBootSec=20min
+OnUnitActiveSec=24h
+# Si la máquina estuvo apagada al vencer el plazo, correr al volver en lugar de
+# saltear el día — que es justo cuando la cookie lleva más tiempo quieta.
+Persistent=true
+# El disparo exacto no importa; separarlo evita competir con el prober.
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
