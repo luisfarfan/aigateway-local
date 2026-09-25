@@ -1,0 +1,16 @@
+# 02:00 UTC del sábado: hora y media después del barrido de imagen, con la
+# cuota diaria ya repuesta (se repone a medianoche UTC) y sin competir con él.
+#
+# Es semanal sólo como REINTENTO: el script se desactiva a sí mismo en cuanto
+# llega a un veredicto. Si la ventana lo encuentra sin cuota —el barrido puede
+# habérsela llevado, o alguien la gastó— el experimento no distingue nada y
+# vuelve a intentarlo la semana siguiente en vez de concluir de más.
+[Unit]
+Description=Proxima Gateway — experimento único sobre la búsqueda web de Gemini
+
+[Timer]
+OnCalendar=Sat *-*-* 02:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+# Mide si la búsqueda de imágenes web de geminiweb/ depende de la cuota de
+# generación. Se desactiva solo al llegar a un veredicto.
+# Ver ops/geminiweb-websearch-probe.sh.
+[Unit]
+Description=Proxima Gateway — ¿la búsqueda web de Gemini depende de la cuota?
+After=network-online.target aigateway.service
+# El barrido de imagen corre antes en la misma madrugada y también gasta cuota.
+# Esto no lo bloquea —son timers independientes— pero deja dicho el orden.
+After=aigateway-prober-images.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/aigateway-local
+ExecStart=%h/projects/aigateway-local/ops/geminiweb-websearch-probe.sh
+# Dos generaciones de imagen, 20-150 s cada una, más margen.
+TimeoutStartSec=900
