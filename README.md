@@ -1078,12 +1078,27 @@ circuitos pero no avisa a nadie):
   es peor que ninguna. El estado del flanco vive en Redis para que API y worker
   no avisen dos veces de lo mismo.
 
-Canal de aviso (opcional; sin configurar, sólo queda el log y la métrica):
+Canal de aviso (opcional; sin configurar, sólo queda el log y la métrica).
+Se configura solo — pide el token sin eco, descubre el chat id y manda una
+prueba antes de escribir nada:
+
+```bash
+python scripts/telegram_setup.py           # interactivo, una sola vez
+python scripts/telegram_setup.py --check   # probar el canal ya configurado
+```
+
+Antes hay que crear el bot en **@BotFather** (`/newbot`) y mandarle `/start`:
+sin ese primer mensaje tuyo la Bot API no te deja escribir, y el chat id todavía
+no existe. Lo que termina en el `.env` es esto:
 
 ```env
 TELEGRAM_BOT_TOKEN="123456:ABC..."   # de @BotFather
-TELEGRAM_CHAT_ID="123456789"         # de https://api.telegram.org/bot<token>/getUpdates
+TELEGRAM_CHAT_ID="123456789"         # lo descubre el script por getUpdates
 ```
+
+El script existe para no tener que abrir
+`https://api.telegram.org/bot<token>/getUpdates` en el navegador, que es la
+forma más fácil de dejar el token en el historial.
 
 Es un puerto (`src/modules/notifications/`), no una llamada suelta a Telegram:
 cambiar a ntfy, un webhook o correo es escribir otro adaptador, sin tocar nada
